@@ -1,0 +1,68 @@
+[project]
+name = "mendeley-mcp"
+version = "0.1.0"
+description = "MCP server for Mendeley reference manager - search, retrieve, and manage your academic library"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Sudhakar Pallaprolu" }
+]
+keywords = ["mcp", "mendeley", "reference-manager", "academic", "research", "citations"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+
+dependencies = [
+    "mcp>=1.2.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "keyring>=25.0.0",
+    "click>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+mendeley-mcp = "mendeley_mcp.server:main"
+mendeley-auth = "mendeley_mcp.auth:cli"
+
+[project.urls]
+Homepage = "https://github.com/pallaprolus/mendeley-mcp"
+Repository = "https://github.com/pallaprolus/mendeley-mcp"
+Issues = "https://github.com/pallaprolus/mendeley-mcp/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mendeley_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
