@@ -16,10 +16,12 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Prerequisites
 
-1. **Mendeley Account** - Sign up at [mendeley.com](https://www.mendeley.com/)
+1. **Mendeley Account** - Sign up at [mendeley.com](https://www.mendeley.com/) (uses Elsevier authentication)
 2. **Mendeley API App** - Register at [dev.mendeley.com/myapps.html](https://dev.mendeley.com/myapps.html)
+   - Sign in with your Elsevier credentials
    - Click "Register a new app"
    - Set redirect URL to `http://localhost:8585/callback`
+   - Select "Authorization code" flow (not Legacy)
    - Note your **Client ID** and **Client Secret**
 
 ## Installation
@@ -57,13 +59,14 @@ mendeley-auth login
 This will:
 1. Prompt for your Client ID and Client Secret
 2. Open your browser to authorize the app
-3. Save your credentials securely (uses system keyring if available)
+3. Save your credentials securely in your system keyring
 
 ### 2. Add to Claude Desktop
 
 Edit your Claude Desktop config file:
 
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Linux**: `~/.config/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
@@ -118,13 +121,17 @@ Once configured, you can ask Claude things like:
 
 ### Environment Variables
 
-You can also configure credentials via environment variables:
+If you prefer not to use `mendeley-auth login`, you can configure credentials via environment variables:
 
 ```bash
+# Required
 export MENDELEY_CLIENT_ID="your-client-id"
 export MENDELEY_CLIENT_SECRET="your-client-secret"
-export MENDELEY_ACCESS_TOKEN="your-access-token"
+
+# One of the following (refresh token recommended - access tokens expire quickly)
 export MENDELEY_REFRESH_TOKEN="your-refresh-token"
+# OR
+export MENDELEY_ACCESS_TOKEN="your-access-token"
 ```
 
 Or in your MCP config:
@@ -192,16 +199,16 @@ ruff check src/
 npm install -g @modelcontextprotocol/inspector
 
 # Run your server with inspector
-mcp dev src/mendeley_mcp/server.py
+npx @modelcontextprotocol/inspector mendeley-mcp
 ```
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Claude Desktop │────▶│  mendeley-mcp    │────▶│  Mendeley API   │
-│  (MCP Client)   │◀────│  (MCP Server)    │◀────│  api.mendeley   │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
+┌─────────────────┐     ┌──────────────────┐     ┌───────────────────┐
+│  Claude Desktop │────▶│  mendeley-mcp    │────▶│   Mendeley API    │
+│  (MCP Client)   │◀────│  (MCP Server)    │◀────│ api.mendeley.com  │
+└─────────────────┘     └──────────────────┘     └───────────────────┘
                                │
                                ▼
                         ┌──────────────────┐
@@ -211,6 +218,8 @@ mcp dev src/mendeley_mcp/server.py
 ```
 
 **Important**: This server runs locally on your machine. Your credentials and data never pass through any third-party servers - all communication is directly between your computer and Mendeley's API.
+
+**Credential Storage**: Your OAuth tokens and client secret are stored securely in your system's native keyring (macOS Keychain, Windows Credential Locker, or Linux Secret Service). Only the non-sensitive client ID is stored in `~/.config/mendeley-mcp/credentials.json`.
 
 ## Rate Limits
 

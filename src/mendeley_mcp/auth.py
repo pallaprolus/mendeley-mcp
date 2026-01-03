@@ -99,7 +99,8 @@ def save_credentials(
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     if KEYRING_AVAILABLE:
-        # Store sensitive tokens in system keyring
+        # Store sensitive credentials in system keyring
+        keyring.set_password("mendeley-mcp", "client_secret", client_secret)
         keyring.set_password("mendeley-mcp", "access_token", access_token)
         keyring.set_password("mendeley-mcp", "refresh_token", refresh_token)
 
@@ -135,9 +136,11 @@ def load_credentials() -> dict[str, str] | None:
         config = json.load(f)
 
     if config.get("use_keyring") and KEYRING_AVAILABLE:
+        client_secret = keyring.get_password("mendeley-mcp", "client_secret")
         access_token = keyring.get_password("mendeley-mcp", "access_token")
         refresh_token = keyring.get_password("mendeley-mcp", "refresh_token")
         if access_token and refresh_token:
+            config["client_secret"] = client_secret
             config["access_token"] = access_token
             config["refresh_token"] = refresh_token
         else:
@@ -350,6 +353,7 @@ def logout() -> None:
 
     if KEYRING_AVAILABLE:
         try:
+            keyring.delete_password("mendeley-mcp", "client_secret")
             keyring.delete_password("mendeley-mcp", "access_token")
             keyring.delete_password("mendeley-mcp", "refresh_token")
             click.echo("Keyring credentials removed.")
