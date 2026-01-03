@@ -9,6 +9,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://img.shields.io/pypi/v/mendeley-mcp.svg)](https://pypi.org/project/mendeley-mcp/)
+[![Docker](https://img.shields.io/badge/docker-available-blue.svg)](https://github.com/pallaprolus/mendeley-mcp/pkgs/container/mendeley-mcp)
 
 ## Features
 
@@ -41,6 +42,23 @@ pip install mendeley-mcp
 
 ```bash
 uv tool install mendeley-mcp
+```
+
+### Using Docker
+
+```bash
+docker run -it \
+  -e MENDELEY_CLIENT_ID="your-client-id" \
+  -e MENDELEY_CLIENT_SECRET="your-client-secret" \
+  -e MENDELEY_REFRESH_TOKEN="your-refresh-token" \
+  ghcr.io/pallaprolus/mendeley-mcp
+```
+
+Or build locally:
+```bash
+git clone https://github.com/pallaprolus/mendeley-mcp.git
+cd mendeley-mcp
+docker build -t mendeley-mcp .
 ```
 
 ### From source
