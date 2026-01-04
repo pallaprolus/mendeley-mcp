@@ -11,6 +11,10 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 [![PyPI version](https://img.shields.io/pypi/v/mendeley-mcp.svg)](https://pypi.org/project/mendeley-mcp/)
 [![Docker](https://img.shields.io/badge/docker-available-blue.svg)](https://github.com/pallaprolus/mendeley-mcp/pkgs/container/mendeley-mcp)
 
+<a href="https://glama.ai/mcp/servers/@pallaprolus/mendeley-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@pallaprolus/mendeley-mcp/badge" alt="Mendeley MCP server on Glama" />
+</a>
+
 ## Features
 
 - **Search your library** - Find papers by title, author, abstract, or notes
