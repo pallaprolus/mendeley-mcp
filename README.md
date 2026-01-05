@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="mendeley-mcp.png" alt="Mendeley MCP Logo" width="200">
+  <img src="https://raw.githubusercontent.com/pallaprolus/mendeley-mcp/main/mendeley-mcp.png" alt="Mendeley MCP Logo" width="200">
 </p>
 
 # Mendeley MCP Server
