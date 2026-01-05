@@ -9,6 +9,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://img.shields.io/pypi/v/mendeley-mcp.svg)](https://pypi.org/project/mendeley-mcp/)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/mendeley-mcp?period=total&units=international_system&left_color=black&right_color=green&left_text=downloads)](https://pepy.tech/project/mendeley-mcp)
 [![Docker](https://img.shields.io/badge/docker-available-blue.svg)](https://github.com/pallaprolus/mendeley-mcp/pkgs/container/mendeley-mcp)
 
 <a href="https://glama.ai/mcp/servers/@pallaprolus/mendeley-mcp">
