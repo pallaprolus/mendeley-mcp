@@ -25,6 +25,10 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 - **DOI lookup** - Find papers by their DOI
 - **Add documents** - Create new entries in your library
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/pallaprolus-mendeley-mcp).
+
 ## Prerequisites
 
 1. **Mendeley Account** - Sign up at [mendeley.com](https://www.mendeley.com/) (uses Elsevier authentication)
