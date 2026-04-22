@@ -358,19 +358,25 @@ async def test_folder_rename_delete_tools_propagate_upstream_errors(
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "client_method", "kwargs", "message"),
+    ("tool_name", "client_method", "kwargs", "message", "expected_call"),
     [
         (
             "mendeley_create_folder",
             "create_folder",
             {"name": "Systematic Review 2026"},
             "upstream create failure",
+            {
+                "name": "Systematic Review 2026",
+                "parent_id": None,
+                "group_id": None,
+            },
         ),
         (
             "mendeley_add_document_to_folder",
             "add_document_to_folder",
             {"folder_id": "folder-123", "document_id": "document-456"},
             "upstream assignment failure",
+            {"folder_id": "folder-123", "document_id": "document-456"},
         ),
     ],
     ids=["create-folder", "add-document-to-folder"],
@@ -381,6 +387,7 @@ async def test_folder_management_tools_propagate_upstream_errors(
     client_method: str,
     kwargs: dict[str, str],
     message: str,
+    expected_call: dict[str, str | None],
 ) -> None:
     """Unexpected client errors should be serialized without false success payloads."""
     client, get_client = patched_server_client
@@ -391,7 +398,7 @@ async def test_folder_management_tools_propagate_upstream_errors(
 
     assert _decode_tool_result(result) == {"error": message}
     get_client.assert_awaited_once()
-    getattr(client, client_method).assert_awaited_once_with(**kwargs)
+    getattr(client, client_method).assert_awaited_once_with(**expected_call)
 
 
 class CatalogDownloadClient:

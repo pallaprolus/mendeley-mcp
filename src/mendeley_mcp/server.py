@@ -266,7 +266,13 @@ async def get_document_metadata(
     }
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Search Library",
+    description=(
+        "Search the authenticated Mendeley library by title, authors, abstract, "
+        "or notes and return concise document metadata, citation text, and PDF availability."
+    ),
+)
 async def mendeley_search_library(
     query: str,
     limit: int = 20,
@@ -292,7 +298,13 @@ async def mendeley_search_library(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Get Document",
+    description=(
+        "Fetch full metadata for one library document, including identifiers, abstract, "
+        "keywords, tags, timestamps, and whether a file is attached."
+    ),
+)
 async def mendeley_get_document(
     document_id: str,
 ) -> str:
@@ -330,7 +342,13 @@ async def mendeley_get_document(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List Documents",
+    description=(
+        "List documents from the library, optionally filtered by folder and ordered by "
+        "last modification, creation date, or title."
+    ),
+)
 async def mendeley_list_documents(
     folder_id: str | None = None,
     limit: int = 50,
@@ -366,7 +384,13 @@ async def mendeley_list_documents(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List Folders",
+    description=(
+        "Return the folder and collection structure of the authenticated Mendeley library, "
+        "including parent-child relationships."
+    ),
+)
 async def mendeley_list_folders() -> str:
     """
     List all folders/collections in your Mendeley library.
@@ -511,7 +535,13 @@ async def mendeley_add_document_to_folder(
         return _json_error_response(_format_error_message(e))
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Search Catalog",
+    description=(
+        "Search Mendeley's global catalog for papers that may not yet exist in the user's "
+        "library and return catalog identifiers plus summary metadata."
+    ),
+)
 async def mendeley_search_catalog(
     query: str,
     limit: int = 20,
@@ -556,7 +586,13 @@ async def mendeley_search_catalog(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Get By DOI",
+    description=(
+        "Resolve a DOI against the Mendeley catalog and return the best matching paper "
+        "metadata, including catalog_id for downstream actions."
+    ),
+)
 async def mendeley_get_by_doi(
     doi: str,
 ) -> str:
@@ -592,7 +628,13 @@ async def mendeley_get_by_doi(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Add Document",
+    description=(
+        "Create a new library entry from supplied bibliographic metadata such as title, "
+        "authors, year, source, abstract, and identifiers."
+    ),
+)
 async def mendeley_add_document(
     title: str,
     doc_type: str = "journal",
@@ -638,7 +680,13 @@ async def mendeley_add_document(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Get File Content",
+    description=(
+        "Try to download the first file attached to a library document or catalog entry. "
+        "Returns structured metadata and an embedded PDF resource when Mendeley exposes one."
+    ),
+)
 async def mendeley_get_file_content(
     document_id: str,
 ) -> CallToolResult:

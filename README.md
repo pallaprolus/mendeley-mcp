@@ -141,6 +141,73 @@ The Mendeley tools should now be available in Claude.
 | `mendeley_add_document_to_folder` | Add an existing document to an existing folder |
 | `mendeley_get_file_content` | Download the first attached file for a library or catalog document |
 
+## Tool Reference
+
+### `mendeley_search_library`
+
+Use this when the paper should already exist in the user's library.
+
+- Searches title, authors, abstract, and notes
+- Returns concise metadata, formatted citation text, and `has_pdf`
+- Best first step before falling back to the catalog
+
+### `mendeley_get_document`
+
+Use this after you already know the library `document_id`.
+
+- Returns fuller metadata than the search tool
+- Includes identifiers, keywords, tags, timestamps, abstract, and PDF presence
+- Best for inspection, summarization, and follow-up actions on a known document
+
+### `mendeley_list_documents`
+
+Use this to browse the library instead of searching by keyword.
+
+- Can scope results to a specific `folder_id`
+- Supports sorting by `last_modified`, `created`, or `title`
+- Useful for reviewing recent additions or the contents of one collection
+
+### `mendeley_list_folders`
+
+Use this to understand the collection hierarchy before listing documents by folder.
+
+- Returns folder IDs and names
+- Includes `parent_id` to reconstruct nesting
+- Useful when an LLM needs to navigate a library structure safely
+
+### `mendeley_search_catalog`
+
+Use this when the reference is not in the user's library or when you want broader discovery.
+
+- Searches Mendeley's global catalog
+- Returns `catalog_id`, summary metadata, and truncated abstract text
+- Good fallback when `mendeley_search_library` does not find a match
+
+### `mendeley_get_by_doi`
+
+Use this when a DOI is known and you want a higher-confidence lookup than free-text search.
+
+- Resolves the DOI in the Mendeley catalog
+- Returns `catalog_id` plus richer catalog metadata
+- Useful before `mendeley_add_document` or `mendeley_get_file_content`
+
+### `mendeley_add_document`
+
+Use this to create a library entry from metadata you already have.
+
+- Creates a new Mendeley library record
+- Accepts title, authors, year, source, abstract, and identifiers
+- Does not upload a PDF by itself
+
+### `mendeley_get_file_content`
+
+Use this to try downloading the first file Mendeley exposes for a library document or catalog hit.
+
+- Accepts either a library `document_id` or a `catalog_id`
+- Returns structured metadata and an embedded PDF resource when available
+- If no file exists, returns a clear no-file result instead of failing silently
+- Catalog results often have no downloadable attachment for copyright or licensing reasons
+
 ## Example Usage
 
 Once configured, you can ask Claude things like:
