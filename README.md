@@ -19,7 +19,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 ## Features
 
 - **Search your library** - Find papers by title, author, abstract, or notes
-- **Browse folders** - Navigate your collection structure
+- **Manage folders** - Browse, create, rename, delete, and nest collections
 - **Get full metadata** - Retrieve complete document details including abstracts
 - **Search global catalog** - Access Mendeley's 100M+ paper database
 - **DOI lookup** - Find papers by their DOI
@@ -134,6 +134,10 @@ The Mendeley tools should now be available in Claude.
 | `mendeley_search_catalog` | Search Mendeley's global paper database |
 | `mendeley_get_by_doi` | Look up a paper by DOI |
 | `mendeley_add_document` | Add a new document to your library |
+| `mendeley_create_folder` | Create a folder in your library, optionally under a parent folder or group |
+| `mendeley_rename_folder` | Rename an existing folder and return the updated stable folder payload |
+| `mendeley_delete_folder` | Delete an existing folder and return a deterministic confirmation |
+| `mendeley_add_document_to_folder` | Add an existing document to an existing folder |
 
 ## Example Usage
 
@@ -144,6 +148,68 @@ Once configured, you can ask Claude things like:
 - "Find the paper with DOI 10.1038/nature14539 and summarize it"
 - "Search the Mendeley catalog for recent papers on protein folding"
 - "Add this paper to my library: [title, authors, etc.]"
+- "Create a folder called 'Systematic Review 2026' in my Mendeley library"
+- "Create a subfolder called 'Screening' under folder ID folder-123"
+- "Create a folder called 'Weekly Reading' in group group-456"
+- "Rename folder folder-123 to 'Included Studies'"
+- "Delete folder folder-999 from my Mendeley library"
+- "Add document doc-789 to folder folder-123"
+
+For direct tool calls in an MCP client or inspector, the folder-management tools accept inputs like:
+
+Create a root folder:
+
+```json
+{
+  "name": "Systematic Review 2026"
+}
+```
+
+Create a subfolder:
+
+```json
+{
+  "name": "Screening",
+  "parent_id": "folder-123"
+}
+```
+
+Rename a folder:
+
+```json
+{
+  "folder_id": "folder-123",
+  "name": "Included Studies"
+}
+```
+
+Delete a folder:
+
+```json
+{
+  "folder_id": "folder-999"
+}
+```
+
+Add a document to a folder:
+
+```json
+{
+  "folder_id": "folder-123",
+  "document_id": "doc-789"
+}
+```
+
+### Folder Management Validation
+
+- `mendeley_create_folder` requires a non-empty `name`. You can optionally provide `parent_id` for nested creation or `group_id` for a group-scoped folder.
+- `mendeley_rename_folder` requires non-empty `folder_id` and `name`.
+- `mendeley_delete_folder` requires a non-empty `folder_id`.
+- `mendeley_add_document_to_folder` requires non-empty `folder_id` and `document_id`.
+- Required string inputs are trimmed before the request is sent. Blank or whitespace-only required values return a JSON error response instead of attempting the write.
+- Optional `parent_id` and `group_id` values are trimmed when provided and then forwarded upstream without additional local business rules.
+- Rename and delete operations surface upstream missing-folder, access, or context errors as JSON error responses instead of false success payloads.
+- Adding a document to a folder that already contains it returns a clear duplicate-assignment error instead of a success response.
 
 ## Configuration
 

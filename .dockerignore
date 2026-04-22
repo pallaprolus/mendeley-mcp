@@ -1,6 +1,8 @@
 # Git
 .git
 .gitignore
+Dockerfile*
+.dockerignore
 
 # Python
 __pycache__
@@ -29,7 +31,11 @@ build
 tests
 .coverage
 htmlcov
+coverage/
 
 # Docs
 *.md
 !README.md
+
+# Environment
+.env*

@@ -12,6 +12,7 @@ import os
 import sys
 from typing import Any
 
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from .auth import load_credentials
@@ -81,10 +82,111 @@ def format_document(doc: Document) -> dict[str, Any]:
         "year": doc.year,
         "type": doc.type,
         "source": doc.source,
-        "abstract": doc.abstract[:500] + "..." if doc.abstract and len(doc.abstract) > 500 else doc.abstract,
+        "abstract": (
+            doc.abstract[:500] + "..."
+            if doc.abstract and len(doc.abstract) > 500
+            else doc.abstract
+        ),
         "identifiers": doc.identifiers,
         "has_pdf": doc.file_attached,
         "citation": doc.format_citation(),
+    }
+
+
+def _json_response(payload: Any) -> str:
+    """Serialize a tool response using the repository's JSON-string convention."""
+    return json.dumps(payload, indent=2)
+
+
+def _json_error_response(message: str) -> str:
+    """Serialize an MCP error payload."""
+    return _json_response({"error": message})
+
+
+def _trimmed_input(value: str, field_label: str) -> str:
+    """Trim and validate a required string input."""
+    trimmed = value.strip()
+    if not trimmed:
+        raise ValueError(f"{field_label} must not be blank.")
+    return trimmed
+
+
+def _trimmed_optional_input(value: str | None) -> str | None:
+    """Trim an optional string input without adding new business rules."""
+    if value is None:
+        return None
+    return value.strip()
+
+
+def _format_error_message(exc: Exception) -> str:
+    """Return a stable, user-facing error message."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        response_text = exc.response.text.strip()
+        status_code = exc.response.status_code
+        if response_text:
+            return f"Upstream Mendeley API error ({status_code}): {response_text}"
+        return f"Upstream Mendeley API error ({status_code})."
+
+    message = str(exc).strip()
+    lower_message = message.lower()
+    duplicate_markers = (
+        "duplicate",
+        "already in folder",
+        "already in the folder",
+        "already associated",
+        "already present",
+    )
+    if any(marker in lower_message for marker in duplicate_markers):
+        if "folder" in lower_message:
+            return message
+        return "Document is already in folder."
+
+    return message or exc.__class__.__name__
+
+
+def _get_client_method(client: MendeleyClient, method_name: str) -> Any:
+    """Resolve a client method while tolerating staggered multi-worker changes."""
+    method = getattr(client, method_name, None)
+    if not callable(method):
+        raise RuntimeError(f"Mendeley client does not support '{method_name}' yet.")
+    return method
+
+
+def _read_result_field(result: Any, field_name: str) -> Any:
+    """Read a field from either a dataclass-like object or a mapping result."""
+    if isinstance(result, dict):
+        return result.get(field_name)
+    return getattr(result, field_name, None)
+
+
+def _format_folder_payload(result: Any, fallback_name: str) -> dict[str, Any]:
+    """Build the stable MCP folder payload from a client result."""
+    folder_id = _read_result_field(result, "id")
+    if not isinstance(folder_id, str) or not folder_id:
+        raise ValueError("Folder operation did not return a folder id.")
+
+    name = _read_result_field(result, "name")
+    folder_name = name if isinstance(name, str) and name else fallback_name
+
+    return {
+        "id": folder_id,
+        "name": folder_name,
+        "parent_id": _read_result_field(result, "parent_id"),
+        "created": _read_result_field(result, "created"),
+    }
+
+
+def _format_folder_delete_payload(result: Any, fallback_id: str) -> dict[str, str]:
+    """Build the stable MCP folder-delete payload from a client result."""
+    folder_id = _read_result_field(result, "id")
+    deleted_folder_id = folder_id if isinstance(folder_id, str) and folder_id else fallback_id
+
+    status = _read_result_field(result, "status")
+    deleted_status = status if isinstance(status, str) and status else "deleted"
+
+    return {
+        "id": deleted_folder_id,
+        "status": deleted_status,
     }
 
 
@@ -214,6 +316,126 @@ async def mendeley_list_folders() -> str:
 
 
 @mcp.tool()
+async def mendeley_create_folder(
+    name: str,
+    parent_id: str | None = None,
+    group_id: str | None = None,
+) -> str:
+    """
+    Create a new folder in the personal library or in a group context.
+
+    Args:
+        name: Folder name
+        parent_id: Optional parent folder ID for nested folder creation
+        group_id: Optional group ID for group-scoped folder creation
+
+    Returns:
+        JSON object with the created folder payload
+    """
+    try:
+        trimmed_name = _trimmed_input(name, "name")
+        client = await get_client()
+        create_folder = _get_client_method(client, "create_folder")
+        result = await create_folder(
+            name=trimmed_name,
+            parent_id=_trimmed_optional_input(parent_id),
+            group_id=_trimmed_optional_input(group_id),
+        )
+        return _json_response(_format_folder_payload(result, fallback_name=trimmed_name))
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool()
+async def mendeley_rename_folder(
+    folder_id: str,
+    name: str,
+) -> str:
+    """
+    Rename an existing folder.
+
+    Args:
+        folder_id: The folder ID to rename
+        name: The new folder name
+
+    Returns:
+        JSON object with the renamed folder payload
+    """
+    try:
+        trimmed_folder_id = _trimmed_input(folder_id, "folder_id")
+        trimmed_name = _trimmed_input(name, "name")
+        client = await get_client()
+        rename_folder = _get_client_method(client, "rename_folder")
+        result = await rename_folder(
+            folder_id=trimmed_folder_id,
+            name=trimmed_name,
+        )
+        return _json_response(_format_folder_payload(result, fallback_name=trimmed_name))
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool()
+async def mendeley_delete_folder(
+    folder_id: str,
+) -> str:
+    """
+    Delete an existing folder.
+
+    Args:
+        folder_id: The folder ID to delete
+
+    Returns:
+        JSON object confirming the folder deletion
+    """
+    try:
+        trimmed_folder_id = _trimmed_input(folder_id, "folder_id")
+        client = await get_client()
+        delete_folder = _get_client_method(client, "delete_folder")
+        result = await delete_folder(folder_id=trimmed_folder_id)
+        return _json_response(
+            _format_folder_delete_payload(result, fallback_id=trimmed_folder_id)
+        )
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool()
+async def mendeley_add_document_to_folder(
+    folder_id: str,
+    document_id: str,
+) -> str:
+    """
+    Add an existing document to an existing folder.
+
+    Args:
+        folder_id: The target folder ID
+        document_id: The document ID to add to the folder
+
+    Returns:
+        JSON object confirming the folder assignment
+    """
+    try:
+        trimmed_folder_id = _trimmed_input(folder_id, "folder_id")
+        trimmed_document_id = _trimmed_input(document_id, "document_id")
+        client = await get_client()
+        add_document_to_folder = _get_client_method(client, "add_document_to_folder")
+        await add_document_to_folder(
+            folder_id=trimmed_folder_id,
+            document_id=trimmed_document_id,
+        )
+        return _json_response(
+            {
+                "folder_id": trimmed_folder_id,
+                "document_id": trimmed_document_id,
+                "status": "added",
+            }
+        )
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool()
 async def mendeley_search_catalog(
     query: str,
     limit: int = 20,
@@ -247,7 +469,11 @@ async def mendeley_search_catalog(
                 "year": item.get("year"),
                 "source": item.get("source"),
                 "identifiers": item.get("identifiers"),
-                "abstract": item.get("abstract", "")[:300] + "..." if item.get("abstract") else None,
+                "abstract": (
+                    item.get("abstract", "")[:300] + "..."
+                    if item.get("abstract")
+                    else None
+                ),
             })
         return json.dumps(formatted, indent=2)
     except Exception as e:
