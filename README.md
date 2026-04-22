@@ -24,6 +24,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 - **Search global catalog** - Access Mendeley's 100M+ paper database
 - **DOI lookup** - Find papers by their DOI
 - **Add documents** - Create new entries in your library
+- **Download attached files** - Retrieve document files when Mendeley exposes them
 
 ## Prerequisites
 
@@ -138,6 +139,7 @@ The Mendeley tools should now be available in Claude.
 | `mendeley_rename_folder` | Rename an existing folder and return the updated stable folder payload |
 | `mendeley_delete_folder` | Delete an existing folder and return a deterministic confirmation |
 | `mendeley_add_document_to_folder` | Add an existing document to an existing folder |
+| `mendeley_get_file_content` | Download the first attached file for a library or catalog document |
 
 ## Example Usage
 
@@ -154,6 +156,7 @@ Once configured, you can ask Claude things like:
 - "Rename folder folder-123 to 'Included Studies'"
 - "Delete folder folder-999 from my Mendeley library"
 - "Add document doc-789 to folder folder-123"
+- "For references not found in pdf-indexer, search the catalog and try `mendeley_get_file_content` with the returned `catalog_id`"
 
 For direct tool calls in an MCP client or inspector, the folder-management tools accept inputs like:
 
@@ -210,6 +213,9 @@ Add a document to a folder:
 - Optional `parent_id` and `group_id` values are trimmed when provided and then forwarded upstream without additional local business rules.
 - Rename and delete operations surface upstream missing-folder, access, or context errors as JSON error responses instead of false success payloads.
 - Adding a document to a folder that already contains it returns a clear duplicate-assignment error instead of a success response.
+
+`mendeley_get_file_content` accepts either a library document ID or a `catalog_id`. Catalog
+entries often do not have downloadable files, so a no-file result is expected in many cases.
 
 ## Configuration
 

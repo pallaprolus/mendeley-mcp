@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -9,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import mendeley_mcp.server as server
-from mendeley_mcp.client import Folder
+from mendeley_mcp.client import Document, Folder
 
 pytestmark = pytest.mark.anyio
 
@@ -389,3 +391,116 @@ async def test_folder_management_tools_propagate_upstream_errors(
 
     assert _decode_tool_result(result) == {"error": message}
     get_client.assert_awaited_once()
+    getattr(client, client_method).assert_awaited_once_with(**kwargs)
+
+
+class CatalogDownloadClient:
+    """Fake client for catalog file download tests."""
+
+    async def get_document(self, document_id: str) -> Document:
+        raise RuntimeError("not found in library")
+
+    async def get_catalog_document(
+        self,
+        catalog_id: str | None = None,
+        doi: str | None = None,
+    ) -> dict[str, object]:
+        assert catalog_id == "catalog-123"
+        assert doi is None
+        return {
+            "id": "catalog-123",
+            "title": "Catalog Paper",
+            "year": 2024,
+            "source": "Journal of Testing",
+            "identifiers": {"doi": "10.1234/catalog"},
+        }
+
+    async def get_file_content(self, document_id: str) -> bytes:
+        assert document_id == "catalog-123"
+        return b"%PDF-1.7\ncatalog pdf"
+
+
+class MissingFileClient:
+    """Fake client for missing file tests."""
+
+    async def get_document(self, document_id: str) -> Document:
+        return Document(
+            id=document_id,
+            title="Library Paper",
+            type="journal",
+            authors=[],
+            year=2023,
+            source="Testing Quarterly",
+            identifiers={"doi": "10.1234/library"},
+            file_attached=False,
+        )
+
+    async def get_catalog_document(
+        self,
+        catalog_id: str | None = None,
+        doi: str | None = None,
+    ) -> dict[str, object]:
+        raise AssertionError("catalog lookup should not be used when library metadata exists")
+
+    async def get_file_content(self, document_id: str) -> None:
+        assert document_id == "doc-456"
+        return None
+
+
+def test_mendeley_get_file_content_returns_embedded_pdf(monkeypatch):
+    """The tool should return an embedded PDF resource when content is available."""
+
+    async def fake_get_client():
+        return CatalogDownloadClient()
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+
+    result = asyncio.run(server.mendeley_get_file_content("catalog-123"))
+
+    assert result.isError is False
+    assert result.structuredContent == {
+        "document_id": "catalog-123",
+        "title": "Catalog Paper",
+        "year": 2024,
+        "source": "Journal of Testing",
+        "identifiers": {"doi": "10.1234/catalog"},
+        "lookup_source": "catalog",
+        "file_available": True,
+        "mime_type": "application/pdf",
+        "size_bytes": len(b"%PDF-1.7\ncatalog pdf"),
+        "filename": "Catalog_Paper.pdf",
+    }
+    assert result.content[0].type == "text"
+    assert result.content[1].type == "resource"
+    assert result.content[1].resource.mimeType == "application/pdf"
+    assert (
+        str(result.content[1].resource.uri)
+        == "mendeley://documents/catalog-123/file/Catalog_Paper.pdf"
+    )
+    assert base64.b64decode(result.content[1].resource.blob) == b"%PDF-1.7\ncatalog pdf"
+
+
+def test_mendeley_get_file_content_reports_missing_file(monkeypatch):
+    """The tool should report when no attached file is available."""
+
+    async def fake_get_client():
+        return MissingFileClient()
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+
+    result = asyncio.run(server.mendeley_get_file_content("doc-456"))
+
+    assert result.isError is False
+    assert result.structuredContent == {
+        "document_id": "doc-456",
+        "title": "Library Paper",
+        "year": 2023,
+        "source": "Testing Quarterly",
+        "identifiers": {"doi": "10.1234/library"},
+        "lookup_source": "library",
+        "file_available": False,
+        "mime_type": None,
+        "size_bytes": 0,
+    }
+    assert len(result.content) == 1
+    assert "No attached file is available" in result.content[0].text

@@ -7,13 +7,16 @@ documents in your Mendeley reference library.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
 import sys
 from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import BlobResourceContents, CallToolResult, EmbeddedResource, TextContent
 
 from .auth import load_credentials
 from .client import Document, MendeleyClient, MendeleyCredentials
@@ -187,6 +190,79 @@ def _format_folder_delete_payload(result: Any, fallback_id: str) -> dict[str, st
     return {
         "id": deleted_folder_id,
         "status": deleted_status,
+    }
+
+
+def build_tool_result(
+    message: str,
+    structured_content: dict[str, Any] | None = None,
+    *,
+    is_error: bool = False,
+    embedded_resource: EmbeddedResource | None = None,
+) -> CallToolResult:
+    """Create a consistent CallToolResult payload."""
+    content: list[TextContent | EmbeddedResource] = [
+        TextContent(type="text", text=message),
+    ]
+    if embedded_resource is not None:
+        content.append(embedded_resource)
+
+    return CallToolResult(
+        content=content,
+        structuredContent=structured_content,
+        isError=is_error,
+    )
+
+
+def sanitize_filename(name: str, default_stem: str) -> str:
+    """Create a safe PDF filename for embedded resource metadata."""
+    cleaned = re.sub(r"[^\w.-]+", "_", name).strip("._")
+    if not cleaned:
+        cleaned = default_stem
+    if not cleaned.lower().endswith(".pdf"):
+        cleaned = f"{cleaned}.pdf"
+    return cleaned
+
+
+async def get_document_metadata(
+    client: MendeleyClient,
+    document_id: str,
+) -> dict[str, Any]:
+    """Resolve document metadata from the library first, then the catalog."""
+    try:
+        doc = await client.get_document(document_id)
+        return {
+            "document_id": doc.id,
+            "title": doc.title,
+            "year": doc.year,
+            "source": doc.source,
+            "identifiers": doc.identifiers,
+            "lookup_source": "library",
+        }
+    except Exception:
+        pass
+
+    try:
+        doc = await client.get_catalog_document(catalog_id=document_id)
+        if doc:
+            return {
+                "document_id": doc.get("id", document_id),
+                "title": doc.get("title"),
+                "year": doc.get("year"),
+                "source": doc.get("source"),
+                "identifiers": doc.get("identifiers"),
+                "lookup_source": "catalog",
+            }
+    except Exception:
+        pass
+
+    return {
+        "document_id": document_id,
+        "title": None,
+        "year": None,
+        "source": None,
+        "identifiers": None,
+        "lookup_source": "unknown",
     }
 
 
@@ -560,6 +636,80 @@ async def mendeley_add_document(
         return json.dumps(format_document(doc), indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def mendeley_get_file_content(
+    document_id: str,
+) -> CallToolResult:
+    """
+    Download the first file attached to a Mendeley document.
+
+    This accepts either a library document ID or a catalog ID. Catalog entries
+    often do not have attached files, so an empty result is common there.
+
+    Args:
+        document_id: Mendeley document ID or catalog ID
+
+    Returns:
+        MCP tool result with metadata plus an embedded binary resource when a file exists
+    """
+    client = await get_client()
+    metadata = await get_document_metadata(client, document_id)
+
+    try:
+        file_content = await client.get_file_content(document_id)
+    except Exception as e:
+        structured_content = {
+            **metadata,
+            "file_available": False,
+            "mime_type": None,
+            "size_bytes": None,
+        }
+        return build_tool_result(
+            f"Failed to download file content for document {document_id}: {e}",
+            structured_content,
+            is_error=True,
+        )
+
+    if file_content is None:
+        structured_content = {
+            **metadata,
+            "file_available": False,
+            "mime_type": None,
+            "size_bytes": 0,
+        }
+        return build_tool_result(
+            (
+                f"No attached file is available for document {document_id}. "
+                "Catalog entries frequently do not expose downloadable files."
+            ),
+            structured_content,
+        )
+
+    title = metadata.get("title") or document_id
+    filename = sanitize_filename(title, default_stem=document_id)
+    uri = f"mendeley://documents/{document_id}/file/{filename}"
+    embedded_resource = EmbeddedResource(
+        type="resource",
+        resource=BlobResourceContents(
+            uri=uri,
+            mimeType="application/pdf",
+            blob=base64.b64encode(file_content).decode("ascii"),
+        ),
+    )
+    structured_content = {
+        **metadata,
+        "file_available": True,
+        "mime_type": "application/pdf",
+        "size_bytes": len(file_content),
+        "filename": filename,
+    }
+    return build_tool_result(
+        f"Downloaded attached file for document {document_id}.",
+        structured_content,
+        embedded_resource=embedded_resource,
+    )
 
 
 @mcp.resource("mendeley://library/recent")
