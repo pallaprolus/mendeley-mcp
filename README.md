@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/pallaprolus-mendeley-mcp-badge.png)](https://mseep.ai/app/pallaprolus-mendeley-mcp)
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/pallaprolus/mendeley-mcp/main/mendeley-mcp.png" alt="Mendeley MCP Logo" width="200">
 </p>
