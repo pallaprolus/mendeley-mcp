@@ -152,9 +152,7 @@ class MendeleyClient:
     def _auth_headers(self, accept: str | None = None) -> dict[str, str]:
         """Get authorization headers."""
         if not self.credentials.access_token:
-            raise ValueError(
-                "No access token available. Run 'mendeley-auth login' first."
-            )
+            raise ValueError("No access token available. Run 'mendeley-auth login' first.")
         headers = {
             "Authorization": f"Bearer {self.credentials.access_token}",
         }
@@ -169,6 +167,7 @@ class MendeleyClient:
 
         # Mendeley prefers HTTP Basic Auth
         import base64
+
         auth_str = f"{self.credentials.client_id}:{self.credentials.client_secret}"
         auth_bytes = base64.b64encode(auth_str.encode()).decode()
 
@@ -376,6 +375,26 @@ class MendeleyClient:
             "/documents",
             accept="application/vnd.mendeley-document.1+json",
             json=data,
+            headers={
+                "Content-Type": "application/vnd.mendeley-document.1+json",
+            },
+        )
+        return Document.from_api(response.json())
+
+    async def update_document(
+        self,
+        document_id: str,
+        **kwargs: Any,
+    ) -> Document:
+        """Update fields on an existing document in the library."""
+        if not kwargs:
+            raise ValueError("At least one field must be provided for update")
+
+        response = await self._request(
+            "PATCH",
+            f"/documents/{document_id}",
+            accept="application/vnd.mendeley-document.1+json",
+            json=kwargs,
             headers={
                 "Content-Type": "application/vnd.mendeley-document.1+json",
             },

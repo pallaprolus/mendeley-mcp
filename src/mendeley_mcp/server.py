@@ -74,18 +74,42 @@ def format_document(doc: Document) -> dict[str, Any]:
     return {
         "id": doc.id,
         "title": doc.title,
-        "authors": [
-            f"{a.get('last_name', '')}, {a.get('first_name', '')}"
-            for a in doc.authors
-        ],
+        "authors": [f"{a.get('last_name', '')}, {a.get('first_name', '')}" for a in doc.authors],
         "year": doc.year,
         "type": doc.type,
         "source": doc.source,
-        "abstract": doc.abstract[:500] + "..." if doc.abstract and len(doc.abstract) > 500 else doc.abstract,
+        "abstract": doc.abstract[:500] + "..."
+        if doc.abstract and len(doc.abstract) > 500
+        else doc.abstract,
         "identifiers": doc.identifiers,
         "has_pdf": doc.file_attached,
         "citation": doc.format_citation(),
     }
+
+
+def parse_json_object(value: str | None, field_name: str) -> dict[str, Any] | None:
+    """Parse optional JSON object input for MCP clients with weak schemas."""
+    if not value:
+        return None
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return parsed
+
+
+def parse_authors_json(value: str | None) -> list[dict[str, str]] | None:
+    """Parse optional Mendeley authors JSON input."""
+    if not value:
+        return None
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise ValueError("authors_json must be a JSON array")
+    for author in parsed:
+        if not isinstance(author, dict):
+            raise ValueError("Each author must be a JSON object")
+        if "last_name" not in author:
+            raise ValueError("Each author must include last_name")
+    return parsed
 
 
 @mcp.tool()
@@ -237,18 +261,22 @@ async def mendeley_search_catalog(
         results = await client.search_catalog(query, limit=limit)
         formatted = []
         for item in results:
-            formatted.append({
-                "catalog_id": item.get("id"),
-                "title": item.get("title"),
-                "authors": [
-                    f"{a.get('last_name', '')}, {a.get('first_name', '')}"
-                    for a in item.get("authors", [])
-                ],
-                "year": item.get("year"),
-                "source": item.get("source"),
-                "identifiers": item.get("identifiers"),
-                "abstract": item.get("abstract", "")[:300] + "..." if item.get("abstract") else None,
-            })
+            formatted.append(
+                {
+                    "catalog_id": item.get("id"),
+                    "title": item.get("title"),
+                    "authors": [
+                        f"{a.get('last_name', '')}, {a.get('first_name', '')}"
+                        for a in item.get("authors", [])
+                    ],
+                    "year": item.get("year"),
+                    "source": item.get("source"),
+                    "identifiers": item.get("identifiers"),
+                    "abstract": item.get("abstract", "")[:300] + "..."
+                    if item.get("abstract")
+                    else None,
+                }
+            )
         return json.dumps(formatted, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -295,10 +323,12 @@ async def mendeley_add_document(
     title: str,
     doc_type: str = "journal",
     authors: list[dict[str, str]] | None = None,
+    authors_json: str | None = None,
     year: int | None = None,
     source: str | None = None,
     abstract: str | None = None,
     identifiers: dict[str, str] | None = None,
+    identifiers_json: str | None = None,
 ) -> str:
     """
     Add a new document to your Mendeley library.
@@ -307,10 +337,14 @@ async def mendeley_add_document(
         title: Document title (required)
         doc_type: Type - 'journal', 'book', 'conference_proceedings', etc.
         authors: List of author dicts with 'first_name' and 'last_name'
+        authors_json: JSON array of author objects, useful when clients cannot
+            pass nested authors. Example: [{"first_name":"Jun","last_name":"Liu"}]
         year: Publication year
         source: Journal/book name
         abstract: Document abstract
         identifiers: Dict with 'doi', 'pmid', 'isbn', etc.
+        identifiers_json: JSON object of identifiers, useful when clients cannot
+            pass nested identifiers.
 
     Returns:
         JSON object with the created document
@@ -318,19 +352,77 @@ async def mendeley_add_document(
     client = await get_client()
 
     kwargs: dict[str, Any] = {}
-    if authors:
-        kwargs["authors"] = authors
-    if year:
-        kwargs["year"] = year
-    if source:
-        kwargs["source"] = source
-    if abstract:
-        kwargs["abstract"] = abstract
-    if identifiers:
-        kwargs["identifiers"] = identifiers
 
     try:
+        parsed_authors = authors or parse_authors_json(authors_json)
+        parsed_identifiers = identifiers or parse_json_object(identifiers_json, "identifiers_json")
+        if parsed_authors:
+            kwargs["authors"] = parsed_authors
+        if year:
+            kwargs["year"] = year
+        if source:
+            kwargs["source"] = source
+        if abstract:
+            kwargs["abstract"] = abstract
+        if parsed_identifiers:
+            kwargs["identifiers"] = parsed_identifiers
+
         doc = await client.add_document(title=title, doc_type=doc_type, **kwargs)
+        return json.dumps(format_document(doc), indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def mendeley_update_document(
+    document_id: str,
+    title: str | None = None,
+    doc_type: str | None = None,
+    authors_json: str | None = None,
+    year: int | None = None,
+    source: str | None = None,
+    abstract: str | None = None,
+    identifiers_json: str | None = None,
+) -> str:
+    """
+    Update an existing document in your Mendeley library.
+
+    Args:
+        document_id: Existing Mendeley document ID
+        title: New document title
+        doc_type: New Mendeley document type, e.g. 'journal'
+        authors_json: JSON array of author objects. Example:
+            [{"first_name":"Jun","last_name":"Liu"}]
+        year: Publication year
+        source: Journal/book name
+        abstract: Document abstract
+        identifiers_json: JSON object of identifiers, e.g. {"doi":"10..."}
+
+    Returns:
+        JSON object with the updated document
+    """
+    client = await get_client()
+
+    try:
+        kwargs: dict[str, Any] = {}
+        if title is not None:
+            kwargs["title"] = title
+        if doc_type is not None:
+            kwargs["type"] = doc_type
+        parsed_authors = parse_authors_json(authors_json)
+        if parsed_authors is not None:
+            kwargs["authors"] = parsed_authors
+        if year is not None:
+            kwargs["year"] = year
+        if source is not None:
+            kwargs["source"] = source
+        if abstract is not None:
+            kwargs["abstract"] = abstract
+        parsed_identifiers = parse_json_object(identifiers_json, "identifiers_json")
+        if parsed_identifiers is not None:
+            kwargs["identifiers"] = parsed_identifiers
+
+        doc = await client.update_document(document_id=document_id, **kwargs)
         return json.dumps(format_document(doc), indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -354,10 +446,7 @@ async def get_all_folders() -> str:
     client = await get_client()
     try:
         folders = await client.get_folders()
-        results = [
-            {"id": f.id, "name": f.name, "parent_id": f.parent_id}
-            for f in folders
-        ]
+        results = [{"id": f.id, "name": f.name, "parent_id": f.parent_id} for f in folders]
         return json.dumps(results, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)})

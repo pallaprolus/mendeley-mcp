@@ -3,6 +3,7 @@
 import pytest
 
 from mendeley_mcp.client import Document, Folder, MendeleyCredentials
+from mendeley_mcp.server import parse_authors_json, parse_json_object
 
 
 class TestMendeleyCredentials:
@@ -139,3 +140,34 @@ class TestFolder:
 
         assert folder.id == "folder-root"
         assert folder.parent_id is None
+
+
+class TestJsonInputs:
+    """Tests for JSON string helper inputs exposed by MCP tools."""
+
+    def test_parse_authors_json(self):
+        """Test parsing authors from a JSON string."""
+        authors = parse_authors_json('[{"first_name":"Ada","last_name":"Lovelace"}]')
+
+        assert authors == [{"first_name": "Ada", "last_name": "Lovelace"}]
+
+    def test_parse_authors_json_requires_array(self):
+        """Test rejecting non-array author JSON."""
+        with pytest.raises(ValueError, match="JSON array"):
+            parse_authors_json('{"first_name":"Ada","last_name":"Lovelace"}')
+
+    def test_parse_authors_json_requires_last_name(self):
+        """Test rejecting authors without a last name."""
+        with pytest.raises(ValueError, match="last_name"):
+            parse_authors_json('[{"first_name":"Ada"}]')
+
+    def test_parse_json_object(self):
+        """Test parsing a JSON object input."""
+        identifiers = parse_json_object('{"doi":"10.1234/test"}', "identifiers_json")
+
+        assert identifiers == {"doi": "10.1234/test"}
+
+    def test_parse_json_object_rejects_array(self):
+        """Test rejecting non-object JSON."""
+        with pytest.raises(ValueError, match="JSON object"):
+            parse_json_object('["doi"]', "identifiers_json")
