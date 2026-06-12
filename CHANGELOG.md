@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - CI workflow running ruff, mypy, and the test suite on Python 3.10–3.12 for
   every push to main and every pull request.
+- Security policy (`SECURITY.md`) with private vulnerability reporting via
+  GitHub security advisories.
 
 ## [0.3.0] - 2026-06-12
 
