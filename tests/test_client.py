@@ -1,8 +1,27 @@
 """Tests for the Mendeley API client."""
 
+from unittest.mock import AsyncMock, Mock, call
+
+import httpx
 import pytest
 
 from mendeley_mcp.client import Document, Folder, MendeleyCredentials
+
+FOLDER_MEDIA_TYPE = "application/vnd.mendeley-folder.1+json"
+DOCUMENT_MEDIA_TYPE = "application/vnd.mendeley-document.1+json"
+
+
+def make_json_response(payload):
+    """Build a mock response object with a JSON payload."""
+    response = Mock()
+    response.json.return_value = payload
+    return response
+
+
+@pytest.fixture
+def anyio_backend():
+    """Run async client tests only on the asyncio backend."""
+    return "asyncio"
 
 
 class TestMendeleyCredentials:
@@ -139,3 +158,268 @@ class TestFolder:
 
         assert folder.id == "folder-root"
         assert folder.parent_id is None
+
+
+class TestMendeleyClientFolderManagement:
+    """Tests for folder-management methods on the client."""
+
+    @pytest.mark.anyio
+    async def test_create_folder_root_success(
+        self,
+        mendeley_client,
+        root_folder_create_request,
+        sample_folder_data,
+    ):
+        """Test creating a root folder."""
+        request_mock = AsyncMock(return_value=make_json_response(sample_folder_data))
+        mendeley_client._request = request_mock
+
+        folder = await mendeley_client.create_folder(**root_folder_create_request)
+
+        assert folder == Folder.from_api(sample_folder_data)
+        request_mock.assert_awaited_once_with(
+            "POST",
+            "/folders",
+            accept=FOLDER_MEDIA_TYPE,
+            json=root_folder_create_request,
+            headers={"Content-Type": FOLDER_MEDIA_TYPE},
+        )
+
+    @pytest.mark.anyio
+    async def test_create_folder_nested_success(
+        self,
+        mendeley_client,
+        nested_folder_create_request,
+        sample_nested_folder_data,
+    ):
+        """Test creating a nested folder under a parent."""
+        request_mock = AsyncMock(return_value=make_json_response(sample_nested_folder_data))
+        mendeley_client._request = request_mock
+
+        folder = await mendeley_client.create_folder(**nested_folder_create_request)
+
+        assert folder == Folder.from_api(sample_nested_folder_data)
+        request_mock.assert_awaited_once_with(
+            "POST",
+            "/folders",
+            accept=FOLDER_MEDIA_TYPE,
+            json=nested_folder_create_request,
+            headers={"Content-Type": FOLDER_MEDIA_TYPE},
+        )
+
+    @pytest.mark.anyio
+    async def test_create_folder_group_success(
+        self,
+        mendeley_client,
+        group_folder_create_request,
+        sample_group_folder_data,
+    ):
+        """Test creating a folder in a shared group context."""
+        request_mock = AsyncMock(return_value=make_json_response(sample_group_folder_data))
+        mendeley_client._request = request_mock
+
+        folder = await mendeley_client.create_folder(**group_folder_create_request)
+
+        assert folder == Folder.from_api(sample_group_folder_data)
+        request_mock.assert_awaited_once_with(
+            "POST",
+            "/folders",
+            accept=FOLDER_MEDIA_TYPE,
+            json=group_folder_create_request,
+            headers={"Content-Type": FOLDER_MEDIA_TYPE},
+        )
+
+    @pytest.mark.anyio
+    async def test_rename_folder_success(
+        self,
+        mendeley_client,
+        folder_rename_request,
+        renamed_folder_data,
+    ):
+        """Test renaming a folder returns the folder's post-rename state."""
+        request_mock = AsyncMock(
+            side_effect=[
+                Mock(),
+                make_json_response(renamed_folder_data),
+            ]
+        )
+        mendeley_client._request = request_mock
+
+        folder = await mendeley_client.rename_folder(**folder_rename_request)
+
+        assert folder == Folder.from_api(renamed_folder_data)
+        assert request_mock.await_args_list == [
+            call(
+                "PATCH",
+                f"/folders/{folder_rename_request['folder_id']}",
+                accept=FOLDER_MEDIA_TYPE,
+                json={"name": folder_rename_request["name"]},
+                headers={"Content-Type": FOLDER_MEDIA_TYPE},
+            ),
+            call(
+                "GET",
+                f"/folders/{folder_rename_request['folder_id']}",
+                accept=FOLDER_MEDIA_TYPE,
+            ),
+        ]
+
+    @pytest.mark.anyio
+    async def test_delete_folder_success(
+        self,
+        mendeley_client,
+        folder_delete_request,
+        folder_delete_result,
+    ):
+        """Test deleting a folder with a no-payload upstream success response."""
+        request_mock = AsyncMock(return_value=Mock())
+        mendeley_client._request = request_mock
+
+        result = await mendeley_client.delete_folder(**folder_delete_request)
+
+        assert result == folder_delete_result
+        request_mock.assert_awaited_once_with(
+            "DELETE",
+            f"/folders/{folder_delete_request['folder_id']}",
+            accept=FOLDER_MEDIA_TYPE,
+        )
+
+    @pytest.mark.anyio
+    async def test_add_document_to_folder_success(
+        self,
+        mendeley_client,
+        folder_assignment_request,
+        folder_assignment_result,
+    ):
+        """Test adding a document to a folder."""
+        request_mock = AsyncMock(return_value=make_json_response({}))
+        mendeley_client._request = request_mock
+
+        result = await mendeley_client.add_document_to_folder(**folder_assignment_request)
+
+        assert result == folder_assignment_result
+        request_mock.assert_awaited_once_with(
+            "POST",
+            f"/folders/{folder_assignment_request['folder_id']}/documents",
+            accept=DOCUMENT_MEDIA_TYPE,
+            json={"id": folder_assignment_request["document_id"]},
+            headers={"Content-Type": DOCUMENT_MEDIA_TYPE},
+        )
+
+    @pytest.mark.anyio
+    async def test_create_folder_propagates_upstream_failure(
+        self,
+        mendeley_client,
+        root_folder_create_request,
+    ):
+        """Test that upstream create-folder failures are not swallowed."""
+        request = httpx.Request("POST", "https://api.mendeley.com/folders")
+        response = httpx.Response(403, request=request)
+        error = httpx.HTTPStatusError(
+            "upstream rejected folder creation",
+            request=request,
+            response=response,
+        )
+        request_mock = AsyncMock(side_effect=error)
+        mendeley_client._request = request_mock
+
+        with pytest.raises(httpx.HTTPStatusError, match="upstream rejected folder creation"):
+            await mendeley_client.create_folder(**root_folder_create_request)
+
+        request_mock.assert_awaited_once_with(
+            "POST",
+            "/folders",
+            accept=FOLDER_MEDIA_TYPE,
+            json=root_folder_create_request,
+            headers={"Content-Type": FOLDER_MEDIA_TYPE},
+        )
+
+    @pytest.mark.anyio
+    async def test_rename_folder_propagates_upstream_failure(
+        self,
+        mendeley_client,
+        folder_rename_request,
+    ):
+        """Test that upstream rename-folder failures are not swallowed."""
+        request = httpx.Request(
+            "PATCH",
+            f"https://api.mendeley.com/folders/{folder_rename_request['folder_id']}",
+        )
+        response = httpx.Response(409, request=request)
+        error = httpx.HTTPStatusError(
+            "upstream rejected folder rename",
+            request=request,
+            response=response,
+        )
+        request_mock = AsyncMock(side_effect=error)
+        mendeley_client._request = request_mock
+
+        with pytest.raises(httpx.HTTPStatusError, match="upstream rejected folder rename"):
+            await mendeley_client.rename_folder(**folder_rename_request)
+
+        request_mock.assert_awaited_once_with(
+            "PATCH",
+            f"/folders/{folder_rename_request['folder_id']}",
+            accept=FOLDER_MEDIA_TYPE,
+            json={"name": folder_rename_request["name"]},
+            headers={"Content-Type": FOLDER_MEDIA_TYPE},
+        )
+
+    @pytest.mark.anyio
+    async def test_delete_folder_propagates_upstream_failure(
+        self,
+        mendeley_client,
+        folder_delete_request,
+    ):
+        """Test that upstream delete-folder failures are not swallowed."""
+        request = httpx.Request(
+            "DELETE",
+            f"https://api.mendeley.com/folders/{folder_delete_request['folder_id']}",
+        )
+        response = httpx.Response(500, request=request)
+        error = httpx.HTTPStatusError(
+            "upstream rejected folder deletion",
+            request=request,
+            response=response,
+        )
+        request_mock = AsyncMock(side_effect=error)
+        mendeley_client._request = request_mock
+
+        with pytest.raises(httpx.HTTPStatusError, match="upstream rejected folder deletion"):
+            await mendeley_client.delete_folder(**folder_delete_request)
+
+        request_mock.assert_awaited_once_with(
+            "DELETE",
+            f"/folders/{folder_delete_request['folder_id']}",
+            accept=FOLDER_MEDIA_TYPE,
+        )
+
+    @pytest.mark.anyio
+    async def test_add_document_to_folder_propagates_upstream_failure(
+        self,
+        mendeley_client,
+        folder_assignment_request,
+    ):
+        """Test that upstream folder-assignment failures are not swallowed."""
+        request = httpx.Request(
+            "POST",
+            f"https://api.mendeley.com/folders/{folder_assignment_request['folder_id']}/documents",
+        )
+        response = httpx.Response(409, request=request)
+        error = httpx.HTTPStatusError(
+            "upstream rejected folder assignment",
+            request=request,
+            response=response,
+        )
+        request_mock = AsyncMock(side_effect=error)
+        mendeley_client._request = request_mock
+
+        with pytest.raises(httpx.HTTPStatusError, match="upstream rejected folder assignment"):
+            await mendeley_client.add_document_to_folder(**folder_assignment_request)
+
+        request_mock.assert_awaited_once_with(
+            "POST",
+            f"/folders/{folder_assignment_request['folder_id']}/documents",
+            accept=DOCUMENT_MEDIA_TYPE,
+            json={"id": folder_assignment_request["document_id"]},
+            headers={"Content-Type": DOCUMENT_MEDIA_TYPE},
+        )

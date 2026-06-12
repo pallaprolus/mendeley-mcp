@@ -127,19 +127,23 @@ def save_credentials(
         os.chmod(CREDENTIALS_FILE, 0o600)
 
 
-def load_credentials() -> dict[str, str] | None:
+def load_credentials() -> dict[str, Any] | None:
     """Load saved credentials."""
     if not CREDENTIALS_FILE.exists():
         return None
 
     with open(CREDENTIALS_FILE) as f:
-        config = json.load(f)
+        loaded = json.load(f)
+    if not isinstance(loaded, dict):
+        return None
+
+    config = loaded
 
     if config.get("use_keyring") and KEYRING_AVAILABLE:
         client_secret = keyring.get_password("mendeley-mcp", "client_secret")
         access_token = keyring.get_password("mendeley-mcp", "access_token")
         refresh_token = keyring.get_password("mendeley-mcp", "refresh_token")
-        if access_token and refresh_token:
+        if client_secret and access_token and refresh_token:
             config["client_secret"] = client_secret
             config["access_token"] = access_token
             config["refresh_token"] = refresh_token
@@ -157,11 +161,11 @@ def exchange_code_for_tokens(
 ) -> dict[str, str]:
     """Exchange authorization code for access and refresh tokens."""
     import base64
-    
+
     # Mendeley requires HTTP Basic Auth
     auth_string = f"{client_id}:{client_secret}"
     auth_bytes = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
-    
+
     # Try with Basic Auth first
     response = httpx.post(
         MENDELEY_TOKEN_URL,
@@ -175,7 +179,7 @@ def exchange_code_for_tokens(
             "Content-Type": "application/x-www-form-urlencoded",
         },
     )
-    
+
     # If Basic Auth fails, try with credentials in body
     if response.status_code == 401:
         response = httpx.post(
@@ -191,9 +195,21 @@ def exchange_code_for_tokens(
                 "Content-Type": "application/x-www-form-urlencoded",
             },
         )
-    
+
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("Unexpected token response from Mendeley.")
+
+    access_token = payload.get("access_token")
+    refresh_token = payload.get("refresh_token")
+    if not isinstance(access_token, str) or not isinstance(refresh_token, str):
+        raise ValueError("Token response missing access_token or refresh_token.")
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
 
 
 @click.group()
@@ -272,7 +288,7 @@ def login(client_id: str, client_secret: str, port: int) -> None:
     except httpx.HTTPStatusError as e:
         click.echo(f"\nToken exchange failed: {e.response.text}", err=True)
         click.echo(f"Status code: {e.response.status_code}", err=True)
-        click.echo(f"\nDebug info:", err=True)
+        click.echo("\nDebug info:", err=True)
         click.echo(f"  Client ID: {client_id}", err=True)
         click.echo(f"  Redirect URI: {redirect_uri}", err=True)
         click.echo(f"  Code received: {_oauth_response['code'][:20]}...", err=True)

@@ -19,11 +19,12 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 ## Features
 
 - **Search your library** - Find papers by title, author, abstract, or notes
-- **Browse folders** - Navigate your collection structure
+- **Manage folders** - Browse, create, rename, delete, and nest collections
 - **Get full metadata** - Retrieve complete document details including abstracts
 - **Search global catalog** - Access Mendeley's 100M+ paper database
 - **DOI lookup** - Find papers by their DOI
 - **Add documents** - Create new entries in your library
+- **Download attached files** - Retrieve document files when Mendeley exposes them
 
 ## Prerequisites
 
@@ -134,6 +135,79 @@ The Mendeley tools should now be available in Claude.
 | `mendeley_search_catalog` | Search Mendeley's global paper database |
 | `mendeley_get_by_doi` | Look up a paper by DOI |
 | `mendeley_add_document` | Add a new document to your library |
+| `mendeley_create_folder` | Create a folder in your library, optionally under a parent folder or group |
+| `mendeley_rename_folder` | Rename an existing folder |
+| `mendeley_delete_folder` | Delete an existing folder |
+| `mendeley_add_document_to_folder` | Add an existing document to an existing folder |
+| `mendeley_get_file_content` | Download the first attached file for a library or catalog document |
+
+## Tool Reference
+
+### `mendeley_search_library`
+
+Use this when the paper should already exist in the user's library.
+
+- Searches title, authors, abstract, and notes
+- Returns concise metadata, formatted citation text, and `has_pdf`
+- Best first step before falling back to the catalog
+
+### `mendeley_get_document`
+
+Use this after you already know the library `document_id`.
+
+- Returns fuller metadata than the search tool
+- Includes identifiers, keywords, tags, timestamps, abstract, and PDF presence
+- Best for inspection, summarization, and follow-up actions on a known document
+
+### `mendeley_list_documents`
+
+Use this to browse the library instead of searching by keyword.
+
+- Can scope results to a specific `folder_id`
+- Supports sorting by `last_modified`, `created`, or `title`
+- Useful for reviewing recent additions or the contents of one collection
+
+### `mendeley_list_folders`
+
+Use this to understand the collection hierarchy before listing documents by folder.
+
+- Returns folder IDs and names
+- Includes `parent_id` to reconstruct nesting
+- Useful when an LLM needs to navigate a library structure safely
+
+### `mendeley_search_catalog`
+
+Use this when the reference is not in the user's library or when you want broader discovery.
+
+- Searches Mendeley's global catalog
+- Returns `catalog_id`, summary metadata, and truncated abstract text
+- Good fallback when `mendeley_search_library` does not find a match
+
+### `mendeley_get_by_doi`
+
+Use this when a DOI is known and you want a higher-confidence lookup than free-text search.
+
+- Resolves the DOI in the Mendeley catalog
+- Returns `catalog_id` plus richer catalog metadata
+- Useful before `mendeley_add_document` or `mendeley_get_file_content`
+
+### `mendeley_add_document`
+
+Use this to create a library entry from metadata you already have.
+
+- Creates a new Mendeley library record
+- Accepts title, authors, year, source, abstract, and identifiers
+- Does not upload a PDF by itself
+
+### `mendeley_get_file_content`
+
+Use this to try downloading the first file Mendeley exposes for a library document or catalog hit.
+
+- Accepts either a library `document_id` or a `catalog_id`
+- Returns structured metadata and an embedded PDF resource when available
+- If no file exists, returns a clear no-file result instead of failing silently
+- Catalog results often have no downloadable attachment for copyright or licensing reasons
+- Files larger than 10 MB are reported but not embedded, to avoid flooding the client's context window (adjust with the `MENDELEY_MCP_MAX_FILE_BYTES` environment variable)
 
 ## Example Usage
 
@@ -144,6 +218,71 @@ Once configured, you can ask Claude things like:
 - "Find the paper with DOI 10.1038/nature14539 and summarize it"
 - "Search the Mendeley catalog for recent papers on protein folding"
 - "Add this paper to my library: [title, authors, etc.]"
+- "Create a folder called 'Systematic Review 2026' in my Mendeley library"
+- "Create a subfolder called 'Screening' under folder ID folder-123"
+- "Create a folder called 'Weekly Reading' in group group-456"
+- "Rename folder folder-123 to 'Included Studies'"
+- "Delete folder folder-999 from my Mendeley library"
+- "Add document doc-789 to folder folder-123"
+- "Download the PDF attached to the paper about protein folding"
+
+For direct tool calls in an MCP client or inspector, the folder-management tools accept inputs like:
+
+Create a root folder:
+
+```json
+{
+  "name": "Systematic Review 2026"
+}
+```
+
+Create a subfolder:
+
+```json
+{
+  "name": "Screening",
+  "parent_id": "folder-123"
+}
+```
+
+Rename a folder:
+
+```json
+{
+  "folder_id": "folder-123",
+  "name": "Included Studies"
+}
+```
+
+Delete a folder:
+
+```json
+{
+  "folder_id": "folder-999"
+}
+```
+
+Add a document to a folder:
+
+```json
+{
+  "folder_id": "folder-123",
+  "document_id": "doc-789"
+}
+```
+
+### Folder Management Validation
+
+- `mendeley_create_folder` requires a non-empty `name`. You can optionally provide `parent_id` for nested creation or `group_id` for a group-scoped folder.
+- `mendeley_rename_folder` requires non-empty `folder_id` and `name`.
+- `mendeley_delete_folder` requires a non-empty `folder_id`.
+- `mendeley_add_document_to_folder` requires non-empty `folder_id` and `document_id`.
+- Required string inputs are trimmed before the request is sent. Blank or whitespace-only required values return a JSON error response instead of attempting the write.
+- Optional `parent_id` and `group_id` values are trimmed when provided and then forwarded upstream without additional local business rules.
+- Rename and delete operations surface upstream missing-folder, access, or context errors as JSON error responses instead of false success payloads.
+
+`mendeley_get_file_content` accepts either a library document ID or a `catalog_id`. Catalog
+entries often do not have downloadable files, so a no-file result is expected in many cases.
 
 ## Configuration
 

@@ -13,6 +13,9 @@ import httpx
 MENDELEY_API_BASE = "https://api.mendeley.com"
 MENDELEY_AUTH_URL = "https://api.mendeley.com/oauth/authorize"
 MENDELEY_TOKEN_URL = "https://api.mendeley.com/oauth/token"
+DOCUMENT_MEDIA_TYPE = "application/vnd.mendeley-document.1+json"
+FILE_MEDIA_TYPE = "application/vnd.mendeley-file.1+json"
+FOLDER_MEDIA_TYPE = "application/vnd.mendeley-folder.1+json"
 
 
 @dataclass
@@ -162,6 +165,99 @@ class MendeleyClient:
             headers["Accept"] = accept
         return headers
 
+    @staticmethod
+    def _content_type_headers(media_type: str) -> dict[str, str]:
+        """Build a content-type header for typed JSON API requests."""
+        return {"Content-Type": media_type}
+
+    @staticmethod
+    def _json_object(payload: Any, resource_name: str) -> dict[str, Any]:
+        """Validate and return an object-shaped JSON response."""
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"Unexpected {resource_name} response from Mendeley API."
+            )
+        return payload
+
+    @staticmethod
+    def _json_array(payload: Any, resource_name: str) -> list[Any]:
+        """Validate and return an array-shaped JSON response."""
+        if not isinstance(payload, list):
+            raise ValueError(
+                f"Unexpected {resource_name} response from Mendeley API."
+            )
+        return payload
+
+    async def _request_document_resource(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Request a document resource using the shared document media type."""
+        return await self._request(
+            method,
+            path,
+            accept=DOCUMENT_MEDIA_TYPE,
+            **kwargs,
+        )
+
+    async def _request_file_resource(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Request a file resource using the shared file media type."""
+        return await self._request(
+            method,
+            path,
+            accept=FILE_MEDIA_TYPE,
+            **kwargs,
+        )
+
+    async def _request_folder_resource(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Request a folder resource using the shared folder media type."""
+        return await self._request(
+            method,
+            path,
+            accept=FOLDER_MEDIA_TYPE,
+            **kwargs,
+        )
+
+    async def _request_folder_write(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any],
+    ) -> httpx.Response:
+        """Send a folder-management write request with the correct media type."""
+        return await self._request_folder_resource(
+            method,
+            path,
+            json=payload,
+            headers=self._content_type_headers(FOLDER_MEDIA_TYPE),
+        )
+
+    async def _request_folder_document_write(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, str],
+    ) -> httpx.Response:
+        """Send a folder-document write request with the correct media type."""
+        return await self._request_document_resource(
+            method,
+            path,
+            json=payload,
+            headers=self._content_type_headers(DOCUMENT_MEDIA_TYPE),
+        )
+
     async def refresh_access_token(self) -> str:
         """Refresh the access token using the refresh token."""
         if not self.credentials.refresh_token:
@@ -184,13 +280,21 @@ class MendeleyClient:
             },
         )
         response.raise_for_status()
-        data = response.json()
+        data = self._json_object(response.json(), "token refresh")
 
-        self.credentials.access_token = data["access_token"]
-        if "refresh_token" in data:
-            self.credentials.refresh_token = data["refresh_token"]
+        access_token = data.get("access_token")
+        if not isinstance(access_token, str):
+            raise ValueError("Token refresh did not return an access token.")
 
-        return data["access_token"]
+        self.credentials.access_token = access_token
+
+        refresh_token = data.get("refresh_token")
+        if refresh_token is not None:
+            if not isinstance(refresh_token, str):
+                raise ValueError("Token refresh returned an invalid refresh token.")
+            self.credentials.refresh_token = refresh_token
+
+        return access_token
 
     async def _request(
         self,
@@ -221,13 +325,12 @@ class MendeleyClient:
         limit: int = 20,
     ) -> list[Document]:
         """Search documents in the user's library."""
-        response = await self._request(
+        response = await self._request_document_resource(
             "GET",
             "/search/documents",
-            accept="application/vnd.mendeley-document.1+json",
             params={"query": query, "limit": limit},
         )
-        data = response.json()
+        data = self._json_array(response.json(), "document search")
         return [Document.from_api(doc) for doc in data]
 
     async def get_documents(
@@ -247,54 +350,114 @@ class MendeleyClient:
         if folder_id:
             params["folder_id"] = folder_id
 
-        response = await self._request(
+        response = await self._request_document_resource(
             "GET",
             "/documents",
-            accept="application/vnd.mendeley-document.1+json",
             params=params,
         )
-        data = response.json()
+        data = self._json_array(response.json(), "document list")
         return [Document.from_api(doc) for doc in data]
 
     async def get_document(self, document_id: str) -> Document:
         """Get a specific document by ID."""
-        response = await self._request(
+        response = await self._request_document_resource(
             "GET",
             f"/documents/{document_id}",
-            accept="application/vnd.mendeley-document.1+json",
             params={"view": "all"},
         )
-        return Document.from_api(response.json())
+        return Document.from_api(self._json_object(response.json(), "document"))
 
     async def get_folders(self) -> list[Folder]:
         """Get all folders in the library."""
-        response = await self._request(
+        response = await self._request_folder_resource(
             "GET",
             "/folders",
-            accept="application/vnd.mendeley-folder.1+json",
         )
-        data = response.json()
+        data = self._json_array(response.json(), "folder list")
         return [Folder.from_api(folder) for folder in data]
 
     async def get_folder(self, folder_id: str) -> Folder:
         """Get a specific folder by ID."""
-        response = await self._request(
+        response = await self._request_folder_resource(
             "GET",
             f"/folders/{folder_id}",
-            accept="application/vnd.mendeley-folder.1+json",
         )
-        return Folder.from_api(response.json())
+        return Folder.from_api(self._json_object(response.json(), "folder"))
+
+    async def create_folder(
+        self,
+        name: str,
+        parent_id: str | None = None,
+        group_id: str | None = None,
+    ) -> Folder:
+        """Create a folder in the personal library or a group."""
+        payload: dict[str, Any] = {"name": name}
+        if parent_id is not None:
+            payload["parent_id"] = parent_id
+        if group_id is not None:
+            payload["group_id"] = group_id
+
+        response = await self._request_folder_write(
+            "POST",
+            "/folders",
+            payload,
+        )
+        return Folder.from_api(self._json_object(response.json(), "folder"))
+
+    async def rename_folder(
+        self,
+        folder_id: str,
+        name: str,
+    ) -> Folder:
+        """Rename an existing folder and return its post-rename state."""
+        await self._request_folder_write(
+            "PATCH",
+            f"/folders/{folder_id}",
+            {"name": name},
+        )
+        return await self.get_folder(folder_id)
+
+    async def delete_folder(
+        self,
+        folder_id: str,
+    ) -> dict[str, str]:
+        """Delete an existing folder and return a deterministic confirmation."""
+        await self._request(
+            "DELETE",
+            f"/folders/{folder_id}",
+            accept=FOLDER_MEDIA_TYPE,
+        )
+        return {
+            "id": folder_id,
+            "status": "deleted",
+        }
+
+    async def add_document_to_folder(
+        self,
+        folder_id: str,
+        document_id: str,
+    ) -> dict[str, str]:
+        """Add an existing document to a folder."""
+        await self._request_folder_document_write(
+            "POST",
+            f"/folders/{folder_id}/documents",
+            {"id": document_id},
+        )
+        return {
+            "folder_id": folder_id,
+            "document_id": document_id,
+            "status": "added",
+        }
 
     async def get_file_content(self, document_id: str) -> bytes | None:
         """Get the PDF content of a document if available."""
         # First, get the file info
-        response = await self._request(
+        response = await self._request_file_resource(
             "GET",
             "/files",
-            accept="application/vnd.mendeley-file.1+json",
             params={"document_id": document_id},
         )
-        files = response.json()
+        files = self._json_array(response.json(), "file list")
 
         if not files:
             return None
@@ -302,10 +465,9 @@ class MendeleyClient:
         file_id = files[0]["id"]
 
         # Get the download URL
-        response = await self._request(
+        response = await self._request_file_resource(
             "GET",
             f"/files/{file_id}",
-            accept="application/vnd.mendeley-file.1+json",
         )
 
         # The response contains a redirect URL for download
@@ -325,13 +487,12 @@ class MendeleyClient:
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Search the Mendeley catalog (global database)."""
-        response = await self._request(
+        response = await self._request_document_resource(
             "GET",
             "/search/catalog",
-            accept="application/vnd.mendeley-document.1+json",
             params={"query": query, "limit": limit},
         )
-        return response.json()
+        return self._json_array(response.json(), "catalog search")
 
     async def get_catalog_document(
         self,
@@ -343,19 +504,18 @@ class MendeleyClient:
             response = await self._request(
                 "GET",
                 "/catalog",
-                accept="application/vnd.mendeley-document.1+json",
+                accept=DOCUMENT_MEDIA_TYPE,
                 params={"doi": doi, "view": "all"},
             )
-            data = response.json()
+            data = self._json_array(response.json(), "catalog lookup")
             return data[0] if data else {}
         elif catalog_id:
-            response = await self._request(
+            response = await self._request_document_resource(
                 "GET",
                 f"/catalog/{catalog_id}",
-                accept="application/vnd.mendeley-document.1+json",
                 params={"view": "all"},
             )
-            return response.json()
+            return self._json_object(response.json(), "catalog document")
         else:
             raise ValueError("Either catalog_id or doi must be provided")
 
@@ -371,13 +531,10 @@ class MendeleyClient:
             "type": doc_type,
             **kwargs,
         }
-        response = await self._request(
+        response = await self._request_document_resource(
             "POST",
             "/documents",
-            accept="application/vnd.mendeley-document.1+json",
             json=data,
-            headers={
-                "Content-Type": "application/vnd.mendeley-document.1+json",
-            },
+            headers=self._content_type_headers(DOCUMENT_MEDIA_TYPE),
         )
-        return Document.from_api(response.json())
+        return Document.from_api(self._json_object(response.json(), "document"))
