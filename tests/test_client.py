@@ -579,3 +579,84 @@ class TestMendeleyClientDocumentManagement:
             await mendeley_client.export_bibtex()
 
         request_mock.assert_not_awaited()
+
+
+class TestGetFileContent:
+    """Tests for file download redirect handling."""
+
+    @pytest.mark.anyio
+    async def test_get_file_content_follows_303_redirect(
+        self,
+        mendeley_client,
+        monkeypatch,
+    ):
+        """Mendeley answers the file lookup with a 303 to S3; follow its Location."""
+        import mendeley_mcp.client as client_module
+
+        redirect_request = httpx.Request(
+            "GET", "https://api.mendeley.com/files/file-1"
+        )
+        redirect_response = httpx.Response(
+            303,
+            request=redirect_request,
+            headers={"Location": "https://files.example.com/signed-url"},
+        )
+        redirect_error = httpx.HTTPStatusError(
+            "Redirect response '303 See Other'",
+            request=redirect_request,
+            response=redirect_response,
+        )
+        request_mock = AsyncMock(
+            side_effect=[
+                make_json_response([{"id": "file-1"}]),
+                redirect_error,
+            ]
+        )
+        mendeley_client._request = request_mock
+
+        downloaded = {}
+
+        class FakeDownloadClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def get(self, url):
+                downloaded["url"] = url
+                response = Mock()
+                response.content = b"%PDF-1.7 fake"
+                response.raise_for_status = Mock()
+                return response
+
+        monkeypatch.setattr(
+            client_module.httpx, "AsyncClient", FakeDownloadClient
+        )
+
+        content = await mendeley_client.get_file_content("doc-123")
+
+        assert content == b"%PDF-1.7 fake"
+        assert downloaded["url"] == "https://files.example.com/signed-url"
+
+    @pytest.mark.anyio
+    async def test_get_file_content_propagates_non_redirect_errors(
+        self,
+        mendeley_client,
+    ):
+        """Genuine HTTP errors on the file lookup should not be swallowed."""
+        request = httpx.Request("GET", "https://api.mendeley.com/files/file-1")
+        response = httpx.Response(500, request=request)
+        error = httpx.HTTPStatusError(
+            "server error", request=request, response=response
+        )
+        request_mock = AsyncMock(
+            side_effect=[
+                make_json_response([{"id": "file-1"}]),
+                error,
+            ]
+        )
+        mendeley_client._request = request_mock
+
+        with pytest.raises(httpx.HTTPStatusError, match="server error"):
+            await mendeley_client.get_file_content("doc-123")

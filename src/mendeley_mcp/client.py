@@ -466,13 +466,18 @@ class MendeleyClient:
 
         file_id = files[0]["id"]
 
-        # Get the download URL
-        response = await self._request_file_resource(
-            "GET",
-            f"/files/{file_id}",
-        )
+        # Mendeley answers this with a 303 redirect to a pre-signed S3 URL,
+        # which _request surfaces as an HTTPStatusError.
+        try:
+            response = await self._request_file_resource(
+                "GET",
+                f"/files/{file_id}",
+            )
+        except httpx.HTTPStatusError as e:
+            if not e.response.is_redirect:
+                raise
+            response = e.response
 
-        # The response contains a redirect URL for download
         download_url = response.headers.get("Location")
         if not download_url:
             return None
