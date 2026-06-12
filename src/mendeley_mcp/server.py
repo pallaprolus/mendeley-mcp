@@ -654,6 +654,230 @@ async def mendeley_add_document(
 
 
 @mcp.tool(
+    title="Remove Document From Folder",
+    description=(
+        "Remove a document from a folder without deleting the document from the library."
+    ),
+)
+async def mendeley_remove_document_from_folder(
+    folder_id: str,
+    document_id: str,
+) -> str:
+    """
+    Remove a document from a folder. The document stays in the library.
+
+    Args:
+        folder_id: The folder ID to remove the document from
+        document_id: The document ID to remove
+
+    Returns:
+        JSON object confirming the removal
+    """
+    try:
+        trimmed_folder_id = _trimmed_input(folder_id, "folder_id")
+        trimmed_document_id = _trimmed_input(document_id, "document_id")
+        client = await get_client()
+        result = await client.remove_document_from_folder(
+            folder_id=trimmed_folder_id,
+            document_id=trimmed_document_id,
+        )
+        return _json_response(result)
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool(
+    title="Update Document",
+    description=(
+        "Update bibliographic fields on an existing library document, such as title, "
+        "authors, year, source, abstract, or identifiers. Only supplied fields change."
+    ),
+)
+async def mendeley_update_document(
+    document_id: str,
+    title: str | None = None,
+    doc_type: str | None = None,
+    authors: list[dict[str, str]] | None = None,
+    year: int | None = None,
+    source: str | None = None,
+    abstract: str | None = None,
+    identifiers: dict[str, str] | None = None,
+) -> str:
+    """
+    Update fields on an existing document in your library.
+
+    Args:
+        document_id: The document ID to update
+        title: New document title
+        doc_type: New type - 'journal', 'book', 'conference_proceedings', etc.
+        authors: List of author dicts with 'first_name' and 'last_name'
+        year: Publication year
+        source: Journal/book name
+        abstract: Document abstract
+        identifiers: Dict with 'doi', 'pmid', 'isbn', etc.
+
+    Returns:
+        JSON object with the updated document
+    """
+    try:
+        trimmed_document_id = _trimmed_input(document_id, "document_id")
+        updates: dict[str, Any] = {}
+        if title is not None:
+            updates["title"] = title
+        if doc_type is not None:
+            updates["type"] = doc_type
+        if authors is not None:
+            updates["authors"] = authors
+        if year is not None:
+            updates["year"] = year
+        if source is not None:
+            updates["source"] = source
+        if abstract is not None:
+            updates["abstract"] = abstract
+        if identifiers is not None:
+            updates["identifiers"] = identifiers
+        if not updates:
+            raise ValueError("At least one field to update must be provided.")
+
+        client = await get_client()
+        doc = await client.update_document(
+            document_id=trimmed_document_id,
+            updates=updates,
+        )
+        return _json_response(format_document(doc))
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool(
+    title="Delete Document",
+    description=(
+        "Permanently delete a document from the library. This is destructive and cannot "
+        "be undone through the API — confirm with the user before calling this tool."
+    ),
+)
+async def mendeley_delete_document(
+    document_id: str,
+) -> str:
+    """
+    Permanently delete a document from your library.
+
+    This cannot be undone through the API. Confirm with the user before deleting.
+
+    Args:
+        document_id: The document ID to delete
+
+    Returns:
+        JSON object confirming the deletion
+    """
+    try:
+        trimmed_document_id = _trimmed_input(document_id, "document_id")
+        client = await get_client()
+        result = await client.delete_document(document_id=trimmed_document_id)
+        return _json_response(result)
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+def _format_annotation(annotation: dict[str, Any]) -> dict[str, Any]:
+    """Format an annotation payload, keeping the fields useful to a reader."""
+    positions = annotation.get("positions")
+    pages: list[int] = []
+    if isinstance(positions, list):
+        for position in positions:
+            if isinstance(position, dict) and isinstance(position.get("page"), int):
+                pages.append(position["page"])
+    return {
+        "id": annotation.get("id"),
+        "type": annotation.get("type"),
+        "text": annotation.get("text"),
+        "color": annotation.get("color"),
+        "pages": sorted(set(pages)),
+        "created": annotation.get("created"),
+        "last_modified": annotation.get("last_modified"),
+    }
+
+
+@mcp.tool(
+    title="Get Annotations",
+    description=(
+        "Get the user's own annotations on a library document — PDF highlights and "
+        "sticky notes — including note text and the pages they appear on. Useful for "
+        "surfacing what the user marked as important in a paper."
+    ),
+)
+async def mendeley_get_annotations(
+    document_id: str,
+    limit: int = 50,
+) -> str:
+    """
+    Get your annotations (highlights and notes) on a document.
+
+    Args:
+        document_id: The library document ID
+        limit: Maximum number of annotations to return (default 50)
+
+    Returns:
+        JSON array of annotations with type, text, color, and page numbers
+    """
+    try:
+        trimmed_document_id = _trimmed_input(document_id, "document_id")
+        client = await get_client()
+        annotations = await client.get_annotations(
+            document_id=trimmed_document_id,
+            limit=limit,
+        )
+        formatted = [
+            _format_annotation(a) for a in annotations if isinstance(a, dict)
+        ]
+        return _json_response(formatted)
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool(
+    title="Export BibTeX",
+    description=(
+        "Export one document or all documents in a folder as BibTeX, generated by "
+        "Mendeley. Provide exactly one of document_id or folder_id. Returns raw BibTeX "
+        "text ready to paste into a .bib file."
+    ),
+)
+async def mendeley_export_bibtex(
+    document_id: str | None = None,
+    folder_id: str | None = None,
+    limit: int = 50,
+) -> str:
+    """
+    Export library documents as BibTeX.
+
+    Args:
+        document_id: Export a single document by ID
+        folder_id: Export all documents in a folder by folder ID
+        limit: Maximum number of entries when exporting a folder (default 50)
+
+    Returns:
+        Raw BibTeX text, or a JSON error object on failure
+    """
+    try:
+        trimmed_document_id = _trimmed_optional_input(document_id) or None
+        trimmed_folder_id = _trimmed_optional_input(folder_id) or None
+        if trimmed_document_id and trimmed_folder_id:
+            raise ValueError("Provide either document_id or folder_id, not both.")
+        if not trimmed_document_id and not trimmed_folder_id:
+            raise ValueError("Either document_id or folder_id must be provided.")
+
+        client = await get_client()
+        return await client.export_bibtex(
+            document_id=trimmed_document_id,
+            folder_id=trimmed_folder_id,
+            limit=limit,
+        )
+    except Exception as e:
+        return _json_error_response(_format_error_message(e))
+
+
+@mcp.tool(
     title="Get File Content",
     description=(
         "Try to download the first file attached to a library document or catalog entry. "

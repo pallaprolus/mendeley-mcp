@@ -1,6 +1,6 @@
 [project]
 name = "mendeley-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP server for Mendeley reference manager - search, retrieve, and manage your academic library"
 readme = "README.md"
 license = { text = "MIT" }

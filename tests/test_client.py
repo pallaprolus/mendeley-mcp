@@ -9,6 +9,8 @@ from mendeley_mcp.client import Document, Folder, MendeleyCredentials
 
 FOLDER_MEDIA_TYPE = "application/vnd.mendeley-folder.1+json"
 DOCUMENT_MEDIA_TYPE = "application/vnd.mendeley-document.1+json"
+ANNOTATION_MEDIA_TYPE = "application/vnd.mendeley-annotation.1+json"
+BIBTEX_MEDIA_TYPE = "application/x-bibtex"
 
 
 def make_json_response(payload):
@@ -423,3 +425,157 @@ class TestMendeleyClientFolderManagement:
             json={"id": folder_assignment_request["document_id"]},
             headers={"Content-Type": DOCUMENT_MEDIA_TYPE},
         )
+
+
+class TestMendeleyClientDocumentManagement:
+    """Tests for document update/delete, annotations, and BibTeX export."""
+
+    @pytest.mark.anyio
+    async def test_update_document_patches_then_returns_server_state(
+        self,
+        mendeley_client,
+        sample_document_data,
+    ):
+        """Test that update PATCHes the fields and returns the refetched document."""
+        from mendeley_mcp.client import Document
+
+        updated_data = {**sample_document_data, "title": "Corrected Title"}
+        request_mock = AsyncMock(
+            side_effect=[
+                Mock(),
+                make_json_response(updated_data),
+            ]
+        )
+        mendeley_client._request = request_mock
+
+        doc = await mendeley_client.update_document(
+            document_id=sample_document_data["id"],
+            updates={"title": "Corrected Title"},
+        )
+
+        assert doc == Document.from_api(updated_data)
+        assert request_mock.await_args_list == [
+            call(
+                "PATCH",
+                f"/documents/{sample_document_data['id']}",
+                accept=DOCUMENT_MEDIA_TYPE,
+                json={"title": "Corrected Title"},
+                headers={"Content-Type": DOCUMENT_MEDIA_TYPE},
+            ),
+            call(
+                "GET",
+                f"/documents/{sample_document_data['id']}",
+                accept=DOCUMENT_MEDIA_TYPE,
+                params={"view": "all"},
+            ),
+        ]
+
+    @pytest.mark.anyio
+    async def test_delete_document_returns_confirmation(self, mendeley_client):
+        """Test deleting a document returns a deterministic confirmation."""
+        request_mock = AsyncMock(return_value=Mock())
+        mendeley_client._request = request_mock
+
+        result = await mendeley_client.delete_document("doc-123")
+
+        assert result == {"id": "doc-123", "status": "deleted"}
+        request_mock.assert_awaited_once_with(
+            "DELETE",
+            "/documents/doc-123",
+            accept=DOCUMENT_MEDIA_TYPE,
+        )
+
+    @pytest.mark.anyio
+    async def test_remove_document_from_folder_returns_confirmation(
+        self,
+        mendeley_client,
+    ):
+        """Test removing a document from a folder returns a confirmation."""
+        request_mock = AsyncMock(return_value=Mock())
+        mendeley_client._request = request_mock
+
+        result = await mendeley_client.remove_document_from_folder(
+            folder_id="folder-123",
+            document_id="doc-456",
+        )
+
+        assert result == {
+            "folder_id": "folder-123",
+            "document_id": "doc-456",
+            "status": "removed",
+        }
+        request_mock.assert_awaited_once_with(
+            "DELETE",
+            "/folders/folder-123/documents/doc-456",
+            accept=DOCUMENT_MEDIA_TYPE,
+        )
+
+    @pytest.mark.anyio
+    async def test_get_annotations_requests_annotation_media_type(
+        self,
+        mendeley_client,
+    ):
+        """Test annotations are fetched with the annotation media type."""
+        annotations = [
+            {"id": "ann-1", "type": "highlight", "positions": [{"page": 2}]},
+        ]
+        request_mock = AsyncMock(return_value=make_json_response(annotations))
+        mendeley_client._request = request_mock
+
+        result = await mendeley_client.get_annotations("doc-123", limit=10)
+
+        assert result == annotations
+        request_mock.assert_awaited_once_with(
+            "GET",
+            "/annotations",
+            accept=ANNOTATION_MEDIA_TYPE,
+            params={"document_id": "doc-123", "limit": 10},
+        )
+
+    @pytest.mark.anyio
+    async def test_export_bibtex_for_single_document(self, mendeley_client):
+        """Test single-document BibTeX export uses the bibtex accept header."""
+        bibtex = "@article{key,\n  title = {A Paper}\n}\n"
+        response = Mock()
+        response.text = bibtex
+        request_mock = AsyncMock(return_value=response)
+        mendeley_client._request = request_mock
+
+        result = await mendeley_client.export_bibtex(document_id="doc-123")
+
+        assert result == bibtex
+        request_mock.assert_awaited_once_with(
+            "GET",
+            "/documents/doc-123",
+            accept=BIBTEX_MEDIA_TYPE,
+        )
+
+    @pytest.mark.anyio
+    async def test_export_bibtex_for_folder(self, mendeley_client):
+        """Test folder BibTeX export scopes the document listing to the folder."""
+        bibtex = "@article{a,}\n@article{b,}\n"
+        response = Mock()
+        response.text = bibtex
+        request_mock = AsyncMock(return_value=response)
+        mendeley_client._request = request_mock
+
+        result = await mendeley_client.export_bibtex(folder_id="folder-123", limit=25)
+
+        assert result == bibtex
+        request_mock.assert_awaited_once_with(
+            "GET",
+            "/documents",
+            accept=BIBTEX_MEDIA_TYPE,
+            params={"folder_id": "folder-123", "limit": 25},
+        )
+
+    @pytest.mark.anyio
+    async def test_export_bibtex_requires_a_target(self, mendeley_client):
+        """Test BibTeX export rejects calls with neither document nor folder."""
+        request_mock = AsyncMock()
+        mendeley_client._request = request_mock
+
+        with pytest.raises(ValueError, match="document_id or folder_id"):
+            await mendeley_client.export_bibtex()
+
+        request_mock.assert_not_awaited()

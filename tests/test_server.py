@@ -32,6 +32,11 @@ def patched_server_client(
         rename_folder=AsyncMock(name="rename_folder"),
         delete_folder=AsyncMock(name="delete_folder"),
         add_document_to_folder=AsyncMock(name="add_document_to_folder"),
+        remove_document_from_folder=AsyncMock(name="remove_document_from_folder"),
+        update_document=AsyncMock(name="update_document"),
+        delete_document=AsyncMock(name="delete_document"),
+        get_annotations=AsyncMock(name="get_annotations"),
+        export_bibtex=AsyncMock(name="export_bibtex"),
     )
     get_client = AsyncMock(return_value=client, name="get_client")
     monkeypatch.setattr(server, "get_client", get_client)
@@ -399,6 +404,236 @@ async def test_folder_management_tools_propagate_upstream_errors(
     assert _decode_tool_result(result) == {"error": message}
     get_client.assert_awaited_once()
     getattr(client, client_method).assert_awaited_once_with(**expected_call)
+
+
+async def test_mendeley_remove_document_from_folder_returns_confirmation(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """The removal tool should return the deterministic confirmation payload."""
+    client, get_client = patched_server_client
+    client.remove_document_from_folder.return_value = {
+        "folder_id": "folder-123",
+        "document_id": "document-456",
+        "status": "removed",
+    }
+
+    result = await server.mendeley_remove_document_from_folder(
+        folder_id="  folder-123  ",
+        document_id="  document-456  ",
+    )
+
+    assert _decode_tool_result(result) == {
+        "folder_id": "folder-123",
+        "document_id": "document-456",
+        "status": "removed",
+    }
+    get_client.assert_awaited_once()
+    client.remove_document_from_folder.assert_awaited_once_with(
+        folder_id="folder-123",
+        document_id="document-456",
+    )
+
+
+@pytest.mark.parametrize(
+    ("folder_id", "document_id", "expected_field"),
+    [
+        ("", "document-456", "folder_id"),
+        ("folder-123", "   ", "document_id"),
+    ],
+    ids=["blank-folder-id", "whitespace-document-id"],
+)
+async def test_mendeley_remove_document_from_folder_rejects_blank_ids(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+    folder_id: str,
+    document_id: str,
+    expected_field: str,
+) -> None:
+    """Blank removal inputs should fail local validation before client use."""
+    client, get_client = patched_server_client
+
+    result = await server.mendeley_remove_document_from_folder(
+        folder_id=folder_id,
+        document_id=document_id,
+    )
+
+    payload = _decode_tool_result(result)
+    assert "error" in payload
+    assert expected_field in str(payload["error"]).lower()
+    get_client.assert_not_awaited()
+    client.remove_document_from_folder.assert_not_awaited()
+
+
+async def test_mendeley_update_document_returns_formatted_document(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """The update tool should send only supplied fields and return the document."""
+    client, get_client = patched_server_client
+    client.update_document.return_value = Document(
+        id="doc-123",
+        title="Corrected Title",
+        type="journal",
+        authors=[{"first_name": "Ada", "last_name": "Lovelace"}],
+        year=2025,
+        source="Journal of Fixes",
+        identifiers={"doi": "10.1234/fixed"},
+    )
+
+    result = await server.mendeley_update_document(
+        document_id="  doc-123  ",
+        title="Corrected Title",
+        year=2025,
+    )
+
+    payload = _decode_tool_result(result)
+    assert payload["id"] == "doc-123"
+    assert payload["title"] == "Corrected Title"
+    assert payload["year"] == 2025
+    get_client.assert_awaited_once()
+    client.update_document.assert_awaited_once_with(
+        document_id="doc-123",
+        updates={"title": "Corrected Title", "year": 2025},
+    )
+
+
+async def test_mendeley_update_document_requires_at_least_one_field(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """An update with no fields should fail before the client is requested."""
+    client, get_client = patched_server_client
+
+    result = await server.mendeley_update_document(document_id="doc-123")
+
+    payload = _decode_tool_result(result)
+    assert "error" in payload
+    assert "at least one field" in str(payload["error"]).lower()
+    get_client.assert_not_awaited()
+    client.update_document.assert_not_awaited()
+
+
+async def test_mendeley_delete_document_returns_confirmation(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """The delete tool should return the deterministic deletion confirmation."""
+    client, get_client = patched_server_client
+    client.delete_document.return_value = {
+        "id": "doc-123",
+        "status": "deleted",
+    }
+
+    result = await server.mendeley_delete_document(document_id="  doc-123  ")
+
+    assert _decode_tool_result(result) == {
+        "id": "doc-123",
+        "status": "deleted",
+    }
+    get_client.assert_awaited_once()
+    client.delete_document.assert_awaited_once_with(document_id="doc-123")
+
+
+async def test_mendeley_get_annotations_formats_entries(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """The annotations tool should keep reader-useful fields and derive pages."""
+    client, get_client = patched_server_client
+    client.get_annotations.return_value = [
+        {
+            "id": "ann-1",
+            "type": "highlight",
+            "text": None,
+            "color": {"r": 255, "g": 245, "b": 173},
+            "positions": [
+                {"page": 3, "top_left": {"x": 1, "y": 2}},
+                {"page": 3, "top_left": {"x": 4, "y": 5}},
+                {"page": 4, "top_left": {"x": 6, "y": 7}},
+            ],
+            "created": "2026-01-01T00:00:00Z",
+            "last_modified": "2026-01-02T00:00:00Z",
+            "privacy_level": "private",
+            "filehash": "abc123",
+        },
+        {
+            "id": "ann-2",
+            "type": "sticky_note",
+            "text": "Key methodology section",
+            "positions": [{"page": 7}],
+            "created": "2026-01-03T00:00:00Z",
+            "last_modified": "2026-01-03T00:00:00Z",
+        },
+    ]
+
+    result = await server.mendeley_get_annotations(document_id="doc-123")
+
+    payload = json.loads(result)
+    assert payload == [
+        {
+            "id": "ann-1",
+            "type": "highlight",
+            "text": None,
+            "color": {"r": 255, "g": 245, "b": 173},
+            "pages": [3, 4],
+            "created": "2026-01-01T00:00:00Z",
+            "last_modified": "2026-01-02T00:00:00Z",
+        },
+        {
+            "id": "ann-2",
+            "type": "sticky_note",
+            "text": "Key methodology section",
+            "color": None,
+            "pages": [7],
+            "created": "2026-01-03T00:00:00Z",
+            "last_modified": "2026-01-03T00:00:00Z",
+        },
+    ]
+    get_client.assert_awaited_once()
+    client.get_annotations.assert_awaited_once_with(document_id="doc-123", limit=50)
+
+
+async def test_mendeley_export_bibtex_returns_raw_text_for_document(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """The BibTeX tool should return Mendeley's raw BibTeX text unmodified."""
+    client, get_client = patched_server_client
+    bibtex = "@article{lovelace2025,\n  title = {Corrected Title}\n}\n"
+    client.export_bibtex.return_value = bibtex
+
+    result = await server.mendeley_export_bibtex(document_id="doc-123")
+
+    assert result == bibtex
+    get_client.assert_awaited_once()
+    client.export_bibtex.assert_awaited_once_with(
+        document_id="doc-123",
+        folder_id=None,
+        limit=50,
+    )
+
+
+@pytest.mark.parametrize(
+    ("document_id", "folder_id", "expected_fragment"),
+    [
+        (None, None, "either document_id or folder_id"),
+        ("doc-123", "folder-456", "not both"),
+    ],
+    ids=["neither", "both"],
+)
+async def test_mendeley_export_bibtex_validates_target_selection(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+    document_id: str | None,
+    folder_id: str | None,
+    expected_fragment: str,
+) -> None:
+    """The BibTeX tool should require exactly one of document_id or folder_id."""
+    client, get_client = patched_server_client
+
+    result = await server.mendeley_export_bibtex(
+        document_id=document_id,
+        folder_id=folder_id,
+    )
+
+    payload = _decode_tool_result(result)
+    assert "error" in payload
+    assert expected_fragment in str(payload["error"]).lower()
+    get_client.assert_not_awaited()
+    client.export_bibtex.assert_not_awaited()
 
 
 class CatalogDownloadClient:

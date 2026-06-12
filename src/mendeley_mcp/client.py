@@ -16,6 +16,8 @@ MENDELEY_TOKEN_URL = "https://api.mendeley.com/oauth/token"
 DOCUMENT_MEDIA_TYPE = "application/vnd.mendeley-document.1+json"
 FILE_MEDIA_TYPE = "application/vnd.mendeley-file.1+json"
 FOLDER_MEDIA_TYPE = "application/vnd.mendeley-folder.1+json"
+ANNOTATION_MEDIA_TYPE = "application/vnd.mendeley-annotation.1+json"
+BIBTEX_MEDIA_TYPE = "application/x-bibtex"
 
 
 @dataclass
@@ -538,3 +540,85 @@ class MendeleyClient:
             headers=self._content_type_headers(DOCUMENT_MEDIA_TYPE),
         )
         return Document.from_api(self._json_object(response.json(), "document"))
+
+    async def update_document(
+        self,
+        document_id: str,
+        updates: dict[str, Any],
+    ) -> Document:
+        """Update fields on an existing document and return its post-update state."""
+        await self._request_document_resource(
+            "PATCH",
+            f"/documents/{document_id}",
+            json=updates,
+            headers=self._content_type_headers(DOCUMENT_MEDIA_TYPE),
+        )
+        return await self.get_document(document_id)
+
+    async def delete_document(
+        self,
+        document_id: str,
+    ) -> dict[str, str]:
+        """Delete a document from the library and return a confirmation."""
+        await self._request_document_resource(
+            "DELETE",
+            f"/documents/{document_id}",
+        )
+        return {
+            "id": document_id,
+            "status": "deleted",
+        }
+
+    async def remove_document_from_folder(
+        self,
+        folder_id: str,
+        document_id: str,
+    ) -> dict[str, str]:
+        """Remove a document from a folder without deleting the document."""
+        await self._request_document_resource(
+            "DELETE",
+            f"/folders/{folder_id}/documents/{document_id}",
+        )
+        return {
+            "folder_id": folder_id,
+            "document_id": document_id,
+            "status": "removed",
+        }
+
+    async def get_annotations(
+        self,
+        document_id: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Get the user's annotations (highlights and notes) on a document."""
+        response = await self._request(
+            "GET",
+            "/annotations",
+            accept=ANNOTATION_MEDIA_TYPE,
+            params={"document_id": document_id, "limit": limit},
+        )
+        return self._json_array(response.json(), "annotation list")
+
+    async def export_bibtex(
+        self,
+        document_id: str | None = None,
+        folder_id: str | None = None,
+        limit: int = 50,
+    ) -> str:
+        """Export one document or a folder's documents as BibTeX."""
+        if document_id:
+            response = await self._request(
+                "GET",
+                f"/documents/{document_id}",
+                accept=BIBTEX_MEDIA_TYPE,
+            )
+        elif folder_id:
+            response = await self._request(
+                "GET",
+                "/documents",
+                accept=BIBTEX_MEDIA_TYPE,
+                params={"folder_id": folder_id, "limit": limit},
+            )
+        else:
+            raise ValueError("Either document_id or folder_id must be provided")
+        return response.text
