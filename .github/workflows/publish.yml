@@ -1,9 +1,8 @@
 name: Publish to PyPI
 
+# Publishing is driven by version tags only. GitHub Releases are created on
+# existing tags afterward and must not trigger a second upload.
 on:
-  release:
-    types: [published]
-  # Optional: also trigger on version tag push
   push:
     tags:
       - 'v*'
