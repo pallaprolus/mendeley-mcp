@@ -143,12 +143,14 @@ def load_credentials() -> dict[str, Any] | None:
         client_secret = keyring.get_password("mendeley-mcp", "client_secret")
         access_token = keyring.get_password("mendeley-mcp", "access_token")
         refresh_token = keyring.get_password("mendeley-mcp", "refresh_token")
-        if client_secret and access_token and refresh_token:
-            config["client_secret"] = client_secret
-            config["access_token"] = access_token
-            config["refresh_token"] = refresh_token
-        else:
+        if not (access_token and refresh_token):
             return None
+        config["access_token"] = access_token
+        config["refresh_token"] = refresh_token
+        # Logins made before v0.2.0 did not store the client secret in the
+        # keyring; the tokens still work until they expire, so don't fail here.
+        if client_secret:
+            config["client_secret"] = client_secret
 
     return config
 
