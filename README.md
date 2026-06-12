@@ -6,6 +6,7 @@
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that connects your Mendeley reference library to LLM applications like Claude Desktop, Cursor, and other MCP-compatible clients.
 
+[![CI](https://github.com/pallaprolus/mendeley-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/pallaprolus/mendeley-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://img.shields.io/pypi/v/mendeley-mcp.svg)](https://pypi.org/project/mendeley-mcp/)
