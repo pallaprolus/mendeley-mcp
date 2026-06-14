@@ -8,6 +8,7 @@ documents in your Mendeley reference library.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import re
@@ -24,6 +25,7 @@ from mcp.types import (
     TextContent,
 )
 from pydantic import AnyUrl
+from pypdf import PdfReader
 
 from .auth import load_credentials
 from .client import Document, Folder, MendeleyClient, MendeleyCredentials
@@ -35,6 +37,12 @@ mcp = FastMCP("mendeley")
 # client's context window, so oversized files are reported but not embedded.
 MAX_EMBEDDED_FILE_BYTES = int(
     os.environ.get("MENDELEY_MCP_MAX_FILE_BYTES", str(10 * 1024 * 1024))
+)
+
+# Extracted PDF text is returned as a text block straight into the client's
+# context window, so very long papers are truncated to keep the result usable.
+MAX_EXTRACTED_TEXT_CHARS = int(
+    os.environ.get("MENDELEY_MCP_MAX_TEXT_CHARS", str(200_000))
 )
 
 # Global client instance
@@ -163,11 +171,14 @@ def build_tool_result(
     *,
     is_error: bool = False,
     embedded_resource: EmbeddedResource | None = None,
+    additional_text: str | None = None,
 ) -> CallToolResult:
     """Create a consistent CallToolResult payload."""
     content: list[ContentBlock] = [
         TextContent(type="text", text=message),
     ]
+    if additional_text is not None:
+        content.append(TextContent(type="text", text=additional_text))
     if embedded_resource is not None:
         content.append(embedded_resource)
 
@@ -975,6 +986,133 @@ async def mendeley_get_file_content(
         f"Downloaded attached file for document {document_id}.",
         structured_content,
         embedded_resource=embedded_resource,
+    )
+
+
+def extract_pdf_text(data: bytes) -> tuple[str, int]:
+    """Extract text from PDF bytes, returning (text, page_count).
+
+    Most MCP clients do not decode the embedded PDF resource returned by
+    ``mendeley_get_file_content`` into something the model can read, so this
+    pulls the text out server-side instead.
+    """
+    reader = PdfReader(io.BytesIO(data))
+    pages = [(page.extract_text() or "") for page in reader.pages]
+    return "\n\n".join(pages), len(reader.pages)
+
+
+@mcp.tool(
+    title="Get Document Text",
+    description=(
+        "Extract and return the full text of the PDF attached to a library "
+        "document so the model can read the paper's contents directly. Use this "
+        "when asked to read, summarize, or answer questions about a paper. Works "
+        "on text-based (born-digital) PDFs; scanned or image-only PDFs have no "
+        "text layer and return an empty result."
+    ),
+)
+async def mendeley_get_document_text(
+    document_id: str,
+) -> CallToolResult:
+    """
+    Download the first file attached to a Mendeley document and extract its text.
+
+    Args:
+        document_id: Mendeley document ID or catalog ID
+
+    Returns:
+        MCP tool result whose second text block holds the extracted PDF text
+    """
+    try:
+        client = await get_client()
+    except Exception as e:
+        return build_tool_result(_format_error_message(e), is_error=True)
+
+    metadata = await get_document_metadata(client, document_id)
+
+    try:
+        file_content = await client.get_file_content(document_id)
+    except Exception as e:
+        structured_content = {
+            **metadata,
+            "file_available": False,
+            "text_available": False,
+        }
+        return build_tool_result(
+            f"Failed to download file content for document {document_id}: {e}",
+            structured_content,
+            is_error=True,
+        )
+
+    if file_content is None:
+        structured_content = {
+            **metadata,
+            "file_available": False,
+            "text_available": False,
+        }
+        return build_tool_result(
+            (
+                f"No attached file is available for document {document_id}. "
+                "Catalog entries frequently do not expose downloadable files."
+            ),
+            structured_content,
+        )
+
+    try:
+        text, page_count = extract_pdf_text(file_content)
+    except Exception as e:
+        structured_content = {
+            **metadata,
+            "file_available": True,
+            "text_available": False,
+        }
+        return build_tool_result(
+            (
+                f"Downloaded the file for document {document_id} but could not "
+                f"extract text from it: {e}"
+            ),
+            structured_content,
+            is_error=True,
+        )
+
+    stripped = text.strip()
+    if not stripped:
+        structured_content = {
+            **metadata,
+            "file_available": True,
+            "text_available": False,
+            "page_count": page_count,
+        }
+        return build_tool_result(
+            (
+                f"The attached file for document {document_id} has no extractable "
+                "text layer. It is likely a scanned or image-only PDF, which would "
+                "need OCR to read."
+            ),
+            structured_content,
+        )
+
+    truncated = len(stripped) > MAX_EXTRACTED_TEXT_CHARS
+    body = stripped[:MAX_EXTRACTED_TEXT_CHARS] if truncated else stripped
+    structured_content = {
+        **metadata,
+        "file_available": True,
+        "text_available": True,
+        "page_count": page_count,
+        "char_count": len(stripped),
+        "truncated": truncated,
+    }
+    note = ""
+    if truncated:
+        note = (
+            f" (truncated to {MAX_EXTRACTED_TEXT_CHARS} of {len(stripped)} "
+            "characters; set MENDELEY_MCP_MAX_TEXT_CHARS to adjust)"
+        )
+    title = metadata.get("title") or document_id
+    return build_tool_result(
+        f"Extracted text from {page_count} page(s) of '{title}'{note}.",
+        structured_content,
+        additional_text=body,
     )
 
 

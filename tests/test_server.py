@@ -800,3 +800,151 @@ def test_mendeley_get_file_content_reports_missing_file(monkeypatch):
     }
     assert len(result.content) == 1
     assert "No attached file is available" in result.content[0].text
+
+
+def _make_pdf(text: str) -> bytes:
+    """Build a minimal, valid single-page PDF whose only content is ``text``.
+
+    Used to exercise server-side text extraction without a runtime PDF-writer
+    dependency. Pass an empty string to produce a page with no extractable text.
+    """
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ),
+    ]
+    stream = b"BT /F1 24 Tf 72 720 Td (" + text.encode("latin-1") + b") Tj ET"
+    objs.append(
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n"
+        + stream
+        + b"\nendstream"
+    )
+    objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += str(i).encode() + b" 0 obj\n" + body + b"\nendobj\n"
+    xref_pos = len(out)
+    size = len(objs) + 1
+    out += b"xref\n0 " + str(size).encode() + b"\n"
+    out += b"0000000000 65535 f \n"
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += (
+        b"trailer\n<< /Size " + str(size).encode() + b" /Root 1 0 R >>\n"
+        b"startxref\n" + str(xref_pos).encode() + b"\n%%EOF"
+    )
+    return bytes(out)
+
+
+class TextDownloadClient:
+    """Fake client returning a text-bearing PDF for extraction tests."""
+
+    def __init__(self, pdf_bytes: bytes) -> None:
+        self._pdf_bytes = pdf_bytes
+
+    async def get_document(self, document_id: str) -> Document:
+        return Document(
+            id=document_id,
+            title="Readable Paper",
+            type="journal",
+            authors=[],
+            year=2025,
+            source="Testing Quarterly",
+            identifiers={"doi": "10.1234/readable"},
+            file_attached=True,
+        )
+
+    async def get_catalog_document(
+        self,
+        catalog_id: str | None = None,
+        doi: str | None = None,
+    ) -> dict[str, object]:
+        raise AssertionError("catalog lookup should not be used when library metadata exists")
+
+    async def get_file_content(self, document_id: str) -> bytes:
+        assert document_id == "doc-text"
+        return self._pdf_bytes
+
+
+def test_mendeley_get_document_text_returns_extracted_text(monkeypatch):
+    """The tool should return the extracted PDF text as a second text block."""
+
+    async def fake_get_client():
+        return TextDownloadClient(_make_pdf("MENDELEY_EXTRACT_OK"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+
+    result = asyncio.run(server.mendeley_get_document_text("doc-text"))
+
+    assert result.isError is False
+    assert result.structuredContent is not None
+    assert result.structuredContent["text_available"] is True
+    assert result.structuredContent["file_available"] is True
+    assert result.structuredContent["page_count"] == 1
+    assert result.structuredContent["truncated"] is False
+    assert result.structuredContent["char_count"] > 0
+    assert len(result.content) == 2
+    assert result.content[0].type == "text"
+    assert result.content[1].type == "text"
+    assert "MENDELEY_EXTRACT_OK" in result.content[1].text
+
+
+def test_mendeley_get_document_text_reports_scanned_pdf(monkeypatch):
+    """A PDF with no text layer should be reported, not returned as empty text."""
+
+    async def fake_get_client():
+        return TextDownloadClient(_make_pdf(""))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+
+    result = asyncio.run(server.mendeley_get_document_text("doc-text"))
+
+    assert result.isError is False
+    assert result.structuredContent is not None
+    assert result.structuredContent["text_available"] is False
+    assert result.structuredContent["file_available"] is True
+    assert len(result.content) == 1
+    assert "no extractable text layer" in result.content[0].text
+
+
+def test_mendeley_get_document_text_truncates_long_text(monkeypatch):
+    """Text longer than the cap should be truncated and flagged."""
+
+    async def fake_get_client():
+        return TextDownloadClient(_make_pdf("A" * 50))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    monkeypatch.setattr(server, "MAX_EXTRACTED_TEXT_CHARS", 10)
+
+    result = asyncio.run(server.mendeley_get_document_text("doc-text"))
+
+    assert result.isError is False
+    assert result.structuredContent is not None
+    assert result.structuredContent["truncated"] is True
+    assert len(result.content) == 2
+    assert len(result.content[1].text) == 10
+    assert "truncated" in result.content[0].text
+
+
+def test_mendeley_get_document_text_reports_missing_file(monkeypatch):
+    """When no file is attached, the tool should say so and not return text."""
+
+    async def fake_get_client():
+        return MissingFileClient()
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+
+    result = asyncio.run(server.mendeley_get_document_text("doc-456"))
+
+    assert result.isError is False
+    assert result.structuredContent is not None
+    assert result.structuredContent["text_available"] is False
+    assert result.structuredContent["file_available"] is False
+    assert len(result.content) == 1
+    assert "No attached file is available" in result.content[0].text

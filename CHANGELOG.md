@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-14
+
 ### Added
+- `mendeley_get_document_text` — extract and return the full text of a
+  document's attached PDF as a text block, so the model can actually read the
+  paper. `mendeley_get_file_content` returns the PDF as an embedded binary
+  resource, which most MCP clients (including Claude Code) hand to the model as
+  undecoded base64 rather than readable content; this tool extracts the text
+  server-side instead. Born-digital PDFs only — scanned/image-only PDFs have no
+  text layer and are reported as such. Output is capped at 200,000 characters,
+  adjustable via the `MENDELEY_MCP_MAX_TEXT_CHARS` environment variable.
 - CI workflow running ruff, mypy, and the test suite on Python 3.10–3.12 for
   every push to main and every pull request.
 - Security policy (`SECURITY.md`) with private vulnerability reporting via

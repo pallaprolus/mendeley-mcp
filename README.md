@@ -148,6 +148,7 @@ The Mendeley tools should now be available in Claude.
 | `mendeley_get_annotations` | Get your PDF highlights and notes on a document |
 | `mendeley_export_bibtex` | Export a document or folder as BibTeX |
 | `mendeley_get_file_content` | Download the first attached file for a library or catalog document |
+| `mendeley_get_document_text` | Extract the full text of a document's attached PDF so the model can read the paper |
 
 ## Tool Reference
 
@@ -254,6 +255,16 @@ Use this to try downloading the first file Mendeley exposes for a library docume
 - If no file exists, returns a clear no-file result instead of failing silently
 - Catalog results often have no downloadable attachment for copyright or licensing reasons
 - Files larger than 10 MB are reported but not embedded, to avoid flooding the client's context window (adjust with the `MENDELEY_MCP_MAX_FILE_BYTES` environment variable)
+- Note: most MCP clients (including Claude Code) do not decode the embedded PDF resource into readable content — they pass it to the model as raw base64. To have the model actually read a paper, use `mendeley_get_document_text` instead.
+
+### `mendeley_get_document_text`
+
+Use this when the user wants the model to read, summarize, or answer questions about a paper's contents.
+
+- Accepts either a library `document_id` or a `catalog_id`
+- Downloads the attached PDF and extracts its text **server-side**, returning it as a text block the model can read directly — unlike `mendeley_get_file_content`, this works regardless of whether the client supports embedded PDF resources
+- Born-digital PDFs only; scanned or image-only PDFs have no text layer and are reported as such (they would need OCR)
+- Output is capped at 200,000 characters, with truncation flagged in the result (adjust with the `MENDELEY_MCP_MAX_TEXT_CHARS` environment variable)
 
 ## Example Usage
 
@@ -349,6 +360,16 @@ export MENDELEY_CLIENT_SECRET="your-client-secret"
 export MENDELEY_REFRESH_TOKEN="your-refresh-token"
 # OR
 export MENDELEY_ACCESS_TOKEN="your-access-token"
+```
+
+Optional tuning variables:
+
+```bash
+# Max size of a file embedded by mendeley_get_file_content (default 10 MB)
+export MENDELEY_MCP_MAX_FILE_BYTES="10485760"
+
+# Max characters of extracted text returned by mendeley_get_document_text (default 200000)
+export MENDELEY_MCP_MAX_TEXT_CHARS="200000"
 ```
 
 Or in your MCP config:
