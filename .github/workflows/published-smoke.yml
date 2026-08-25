@@ -1,0 +1,91 @@
+name: Published Artifact Smoke Test
+
+# CI runs on push and pull_request, so it only ever tests the repository. It
+# says nothing about the package already on PyPI, which keeps being installed
+# against dependency versions that did not exist when it was released.
+#
+# That gap is not hypothetical: MCP Python SDK 2.0.0 removed
+# `mcp.server.fastmcp`, so from 2026-07-28 every fresh install of 0.4.0 failed
+# at import while CI stayed green, because nothing had been pushed since June.
+# It surfaced four weeks later as a bug report from a user (#7).
+#
+# This job installs the *published* artifact from PyPI on a schedule, with no
+# repository code on the path, and fails if a fresh install can no longer be
+# imported. A failed scheduled run notifies the repository owner, which is the
+# signal that was missing.
+
+on:
+  schedule:
+    # Daily. Dependency releases are the trigger being watched for, and they
+    # can land any day.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to smoke test (default: latest on PyPI)'
+        required: false
+        type: string
+
+jobs:
+  smoke:
+    name: Fresh install (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The declared floor and the newest supported version. A resolver
+        # difference between them is itself worth catching.
+        python-version: ['3.10', '3.12']
+
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the published package into a clean environment
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/python -m pip install --quiet --upgrade pip
+          spec="mendeley-mcp"
+          if [ -n "${{ inputs.version }}" ]; then
+            spec="mendeley-mcp==${{ inputs.version }}"
+          fi
+          echo "Installing $spec from PyPI"
+          /tmp/smoke/bin/python -m pip install --no-cache-dir "$spec"
+
+      - name: Report what actually resolved
+        run: /tmp/smoke/bin/python -m pip list
+
+      - name: Import the server and the auth CLI
+        run: |
+          /tmp/smoke/bin/python - <<'PY'
+          import asyncio
+          import importlib.metadata as md
+
+          print("mendeley-mcp", md.version("mendeley-mcp"), "| mcp", md.version("mcp"))
+
+          # The import that broke: server.py imports the SDK at module scope, so
+          # an incompatible SDK fails here rather than at first tool call.
+          import mendeley_mcp  # noqa: F401
+          from mendeley_mcp.auth import cli  # noqa: F401
+          from mendeley_mcp.server import mcp
+
+          # Registration exercises the SDK's decorator surface, which a bare
+          # import does not. Deliberately not asserting an exact count, so the
+          # check does not need editing every time a tool is added.
+          tools = asyncio.run(mcp.list_tools())
+          resources = asyncio.run(mcp.list_resources())
+          print(f"registered {len(tools)} tools, {len(resources)} resources")
+          assert tools, "no tools registered"
+          assert resources, "no resources registered"
+          print("import and registration OK")
+          PY
+
+      - name: Console entry points are installed and runnable
+        run: |
+          # mendeley-mcp itself serves on stdio and would block, so only its
+          # presence is checked here; mendeley-auth is the path from #7.
+          test -x /tmp/smoke/bin/mendeley-mcp
+          /tmp/smoke/bin/mendeley-auth --help > /dev/null
+          echo "entry points OK"

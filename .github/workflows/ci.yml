@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Dependencies are declared with lower bounds and no lockfile, so the versions
+  # a build resolves drift on their own between commits. Running on a schedule
+  # catches a dependency release that breaks the suite while main is idle,
+  # instead of the next person to push discovering it.
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   test:
