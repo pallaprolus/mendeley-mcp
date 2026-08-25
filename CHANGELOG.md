@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-24 — Fix installs broken by MCP SDK 2.x
+
+### Fixed
+- Constrained the MCP SDK dependency to `mcp>=1.19.0,<2`. MCP Python SDK 2.0.0
+  removed `mcp.server.fastmcp`, so every fresh install of 0.4.0 resolved the new
+  major and failed at import with `ModuleNotFoundError: No module named
+  'mcp.server.fastmcp'`. Reported in
+  [#7](https://github.com/pallaprolus/mendeley-mcp/issues/7) and fixed in
+  [#9](https://github.com/pallaprolus/mendeley-mcp/pull/9) by
+  [@roych98](https://github.com/roych98), who diagnosed the cause and supplied
+  the fix. Migrating to the v2 API is tracked separately in
+  [#8](https://github.com/pallaprolus/mendeley-mcp/pull/8).
+- The Docker image now installs the package from the checked-out source instead
+  of from PyPI, so an image always contains the commit it was built from.
+  Previously the image build and the PyPI upload both fired on a version tag and
+  raced, so an image could be tagged with a new version while containing the
+  previous one.
+
 ## [0.4.0] - 2026-06-14
 
 ### Added
@@ -95,7 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents, citation formatting, and an OAuth CLI (`mendeley-auth`) with
   keyring-backed credential storage.
 
-[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pallaprolus/mendeley-mcp/releases/tag/v0.2.0
 [0.1.3]: https://pypi.org/project/mendeley-mcp/0.1.3/
