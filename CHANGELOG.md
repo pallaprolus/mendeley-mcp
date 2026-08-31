@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31 — MCP Python SDK v2
+
+### Changed
+- **BREAKING:** Migrated to MCP Python SDK v2. The requirement is now
+  `mcp>=2.0.0,<3.0.0`, and the v1 line is no longer supported — an environment
+  shared with another package pinned to `mcp<2` will need that conflict
+  resolved. Internally `FastMCP` becomes `MCPServer`, tool results use the
+  snake_case `structured_content`/`is_error` fields, and resource URIs are
+  plain strings. Migration contributed by
+  [@roych98](https://github.com/roych98) in
+  [#8](https://github.com/pallaprolus/mendeley-mcp/pull/8).
+
+  No change is expected for users: wire compatibility with v1 was verified
+  before merge by driving the server over stdio with raw JSON-RPC. Tool
+  registration, the embedded PDF resource, and the extracted-text blocks are
+  byte-identical between mcp 1.29.1 and 2.1.1.
+- Dropped the direct `pydantic` dependency, which existed only for the v1
+  `AnyUrl` resource URI. It remains an indirect dependency of the SDK.
+
+### Fixed
+- `serverInfo` now reports this package's version. The v1 SDK defaulted the
+  field to the *SDK's* version, so a client quoting it named the wrong thing;
+  v2 defaults it to empty. It is now read from installed package metadata and
+  cannot drift from `pyproject.toml`, as `__init__.py` had — it was still
+  declaring 0.3.0 at 0.4.1.
+
 ## [0.4.1] - 2026-08-24 — Fix installs broken by MCP SDK 2.x
 
 ### Fixed
@@ -113,7 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents, citation formatting, and an OAuth CLI (`mendeley-auth`) with
   keyring-backed credential storage.
 
-[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.2.0...v0.3.0
