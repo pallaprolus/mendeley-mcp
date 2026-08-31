@@ -13,10 +13,12 @@ import json
 import os
 import re
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import Any
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import (
     BlobResourceContents,
     CallToolResult,
@@ -24,14 +26,19 @@ from mcp.types import (
     EmbeddedResource,
     TextContent,
 )
-from pydantic import AnyUrl
 from pypdf import PdfReader
 
 from .auth import load_credentials
 from .client import Document, Folder, MendeleyClient, MendeleyCredentials
 
-# Initialize the MCP server
-mcp = FastMCP("mendeley")
+try:
+    __version__ = package_version("mendeley-mcp")
+except PackageNotFoundError:  # running from a source tree with no install
+    __version__ = "0.0.0+unknown"
+
+# Initialize the MCP server. The version is what clients report in bug
+# reports, so it has to be this package's version rather than the SDK's.
+mcp = MCPServer("mendeley", version=__version__)
 
 # Embedded files are base64-encoded into the tool result and therefore into the
 # client's context window, so oversized files are reported but not embedded.
@@ -184,8 +191,8 @@ def build_tool_result(
 
     return CallToolResult(
         content=content,
-        structuredContent=structured_content,
-        isError=is_error,
+        structured_content=structured_content,
+        is_error=is_error,
     )
 
 
@@ -970,8 +977,8 @@ async def mendeley_get_file_content(
     embedded_resource = EmbeddedResource(
         type="resource",
         resource=BlobResourceContents(
-            uri=AnyUrl(uri),
-            mimeType="application/pdf",
+            uri=uri,
+            mime_type="application/pdf",
             blob=base64.b64encode(file_content).decode("ascii"),
         ),
     )

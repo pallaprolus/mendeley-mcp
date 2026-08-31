@@ -509,5 +509,5 @@ This project is not affiliated with, endorsed by, or sponsored by Mendeley or El
 ## Acknowledgments
 
 - [Model Context Protocol](https://modelcontextprotocol.io/) by Anthropic
-- [FastMCP](https://github.com/jlowin/fastmcp) Python framework
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
 - [Mendeley API](https://dev.mendeley.com/) documentation

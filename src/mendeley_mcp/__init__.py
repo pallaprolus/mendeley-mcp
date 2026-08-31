@@ -5,10 +5,10 @@ An MCP server for integrating Mendeley reference manager with LLM applications.
 """
 
 from .client import Document, Folder, MendeleyClient, MendeleyCredentials
-from .server import mcp
+from .server import __version__, mcp
 
-__version__ = "0.3.0"
 __all__ = [
+    "__version__",
     "mcp",
     "MendeleyClient",
     "MendeleyCredentials",

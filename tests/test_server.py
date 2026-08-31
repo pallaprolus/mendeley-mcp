@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from mcp.server.mcpserver import MCPServer
 
 import mendeley_mcp.server as server
 from mendeley_mcp.client import Document, Folder
@@ -20,6 +21,11 @@ pytestmark = pytest.mark.anyio
 def anyio_backend() -> str:
     """Run async tool tests only on asyncio to match the project runtime."""
     return "asyncio"
+
+
+def test_server_uses_mcp_sdk_v2_server() -> None:
+    """The application server should use the MCP SDK v2 server class."""
+    assert isinstance(server.mcp, MCPServer)
 
 
 @pytest.fixture
@@ -699,8 +705,8 @@ def test_mendeley_get_file_content_returns_embedded_pdf(monkeypatch):
 
     result = asyncio.run(server.mendeley_get_file_content("catalog-123"))
 
-    assert result.isError is False
-    assert result.structuredContent == {
+    assert result.is_error is False
+    assert result.structured_content == {
         "document_id": "catalog-123",
         "title": "Catalog Paper",
         "year": 2024,
@@ -714,7 +720,7 @@ def test_mendeley_get_file_content_returns_embedded_pdf(monkeypatch):
     }
     assert result.content[0].type == "text"
     assert result.content[1].type == "resource"
-    assert result.content[1].resource.mimeType == "application/pdf"
+    assert result.content[1].resource.mime_type == "application/pdf"
     assert (
         str(result.content[1].resource.uri)
         == "mendeley://documents/catalog-123/file/Catalog_Paper.pdf"
@@ -760,8 +766,8 @@ def test_mendeley_get_file_content_skips_embedding_oversized_files(monkeypatch):
 
     result = asyncio.run(server.mendeley_get_file_content("doc-huge"))
 
-    assert result.isError is False
-    assert result.structuredContent == {
+    assert result.is_error is False
+    assert result.structured_content == {
         "document_id": "doc-huge",
         "title": "Huge Paper",
         "year": 2023,
@@ -786,8 +792,8 @@ def test_mendeley_get_file_content_reports_missing_file(monkeypatch):
 
     result = asyncio.run(server.mendeley_get_file_content("doc-456"))
 
-    assert result.isError is False
-    assert result.structuredContent == {
+    assert result.is_error is False
+    assert result.structured_content == {
         "document_id": "doc-456",
         "title": "Library Paper",
         "year": 2023,
@@ -882,13 +888,13 @@ def test_mendeley_get_document_text_returns_extracted_text(monkeypatch):
 
     result = asyncio.run(server.mendeley_get_document_text("doc-text"))
 
-    assert result.isError is False
-    assert result.structuredContent is not None
-    assert result.structuredContent["text_available"] is True
-    assert result.structuredContent["file_available"] is True
-    assert result.structuredContent["page_count"] == 1
-    assert result.structuredContent["truncated"] is False
-    assert result.structuredContent["char_count"] > 0
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["text_available"] is True
+    assert result.structured_content["file_available"] is True
+    assert result.structured_content["page_count"] == 1
+    assert result.structured_content["truncated"] is False
+    assert result.structured_content["char_count"] > 0
     assert len(result.content) == 2
     assert result.content[0].type == "text"
     assert result.content[1].type == "text"
@@ -905,10 +911,10 @@ def test_mendeley_get_document_text_reports_scanned_pdf(monkeypatch):
 
     result = asyncio.run(server.mendeley_get_document_text("doc-text"))
 
-    assert result.isError is False
-    assert result.structuredContent is not None
-    assert result.structuredContent["text_available"] is False
-    assert result.structuredContent["file_available"] is True
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["text_available"] is False
+    assert result.structured_content["file_available"] is True
     assert len(result.content) == 1
     assert "no extractable text layer" in result.content[0].text
 
@@ -924,9 +930,9 @@ def test_mendeley_get_document_text_truncates_long_text(monkeypatch):
 
     result = asyncio.run(server.mendeley_get_document_text("doc-text"))
 
-    assert result.isError is False
-    assert result.structuredContent is not None
-    assert result.structuredContent["truncated"] is True
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["truncated"] is True
     assert len(result.content) == 2
     assert len(result.content[1].text) == 10
     assert "truncated" in result.content[0].text
@@ -942,9 +948,22 @@ def test_mendeley_get_document_text_reports_missing_file(monkeypatch):
 
     result = asyncio.run(server.mendeley_get_document_text("doc-456"))
 
-    assert result.isError is False
-    assert result.structuredContent is not None
-    assert result.structuredContent["text_available"] is False
-    assert result.structuredContent["file_available"] is False
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["text_available"] is False
+    assert result.structured_content["file_available"] is False
     assert len(result.content) == 1
     assert "No attached file is available" in result.content[0].text
+
+
+def test_server_reports_the_package_version():
+    """serverInfo must carry this package's version, not the SDK's.
+
+    Under the v1 SDK this field defaulted to the SDK version, so a bug report
+    quoting it named the wrong thing. It is also read from installed metadata
+    rather than hard-coded, so it cannot drift from pyproject.
+    """
+    from importlib.metadata import version as package_version
+
+    assert server.__version__ == package_version("mendeley-mcp")
+    assert server.mcp.version == server.__version__
