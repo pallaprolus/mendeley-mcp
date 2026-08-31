@@ -13,6 +13,8 @@ import json
 import os
 import re
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import Any
 
 import httpx
@@ -29,8 +31,14 @@ from pypdf import PdfReader
 from .auth import load_credentials
 from .client import Document, Folder, MendeleyClient, MendeleyCredentials
 
-# Initialize the MCP server
-mcp = MCPServer("mendeley")
+try:
+    __version__ = package_version("mendeley-mcp")
+except PackageNotFoundError:  # running from a source tree with no install
+    __version__ = "0.0.0+unknown"
+
+# Initialize the MCP server. The version is what clients report in bug
+# reports, so it has to be this package's version rather than the SDK's.
+mcp = MCPServer("mendeley", version=__version__)
 
 # Embedded files are base64-encoded into the tool result and therefore into the
 # client's context window, so oversized files are reported but not embedded.

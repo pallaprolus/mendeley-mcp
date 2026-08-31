@@ -954,3 +954,16 @@ def test_mendeley_get_document_text_reports_missing_file(monkeypatch):
     assert result.structured_content["file_available"] is False
     assert len(result.content) == 1
     assert "No attached file is available" in result.content[0].text
+
+
+def test_server_reports_the_package_version():
+    """serverInfo must carry this package's version, not the SDK's.
+
+    Under the v1 SDK this field defaulted to the SDK version, so a bug report
+    quoting it named the wrong thing. It is also read from installed metadata
+    rather than hard-coded, so it cannot drift from pyproject.
+    """
+    from importlib.metadata import version as package_version
+
+    assert server.__version__ == package_version("mendeley-mcp")
+    assert server.mcp.version == server.__version__
