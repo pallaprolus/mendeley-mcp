@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-07 — Structured-content compatibility
+
 ### Fixed
 - Include extracted PDF text in the structured result of
   `mendeley_get_document_text` as well as its existing text block. This keeps
@@ -148,7 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents, citation formatting, and an OAuth CLI (`mendeley-auth`) with
   keyring-backed credential storage.
 
-[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.3.0...v0.4.0
