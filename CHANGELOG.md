@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mendeley_get_document_text` as well as its existing text block. This keeps
   papers readable in clients that expose only structured content to the model
   (issue #11). Both representations use the same text truncation limit.
+  Structured results also include the explanatory message on success and
+  failure paths, including missing files, scanned PDFs, and authentication errors.
+  Thanks to @Storkholm for reporting and isolating the client behavior.
 
 ## [0.5.0] - 2026-08-31 — MCP Python SDK v2
 

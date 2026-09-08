@@ -1008,6 +1008,22 @@ def extract_pdf_text(data: bytes) -> tuple[str, int]:
     return "\n\n".join(pages), len(reader.pages)
 
 
+def _document_text_result(
+    message: str,
+    structured_content: dict[str, Any] | None = None,
+    *,
+    is_error: bool = False,
+    additional_text: str | None = None,
+) -> CallToolResult:
+    """Keep explanations visible to clients that consume only structured content."""
+    return build_tool_result(
+        message,
+        {**(structured_content or {}), "message": message},
+        is_error=is_error,
+        additional_text=additional_text,
+    )
+
+
 @mcp.tool(
     title="Get Document Text",
     description=(
@@ -1033,7 +1049,7 @@ async def mendeley_get_document_text(
     try:
         client = await get_client()
     except Exception as e:
-        return build_tool_result(_format_error_message(e), is_error=True)
+        return _document_text_result(_format_error_message(e), is_error=True)
 
     metadata = await get_document_metadata(client, document_id)
 
@@ -1045,7 +1061,7 @@ async def mendeley_get_document_text(
             "file_available": False,
             "text_available": False,
         }
-        return build_tool_result(
+        return _document_text_result(
             f"Failed to download file content for document {document_id}: {e}",
             structured_content,
             is_error=True,
@@ -1057,7 +1073,7 @@ async def mendeley_get_document_text(
             "file_available": False,
             "text_available": False,
         }
-        return build_tool_result(
+        return _document_text_result(
             (
                 f"No attached file is available for document {document_id}. "
                 "Catalog entries frequently do not expose downloadable files."
@@ -1073,7 +1089,7 @@ async def mendeley_get_document_text(
             "file_available": True,
             "text_available": False,
         }
-        return build_tool_result(
+        return _document_text_result(
             (
                 f"Downloaded the file for document {document_id} but could not "
                 f"extract text from it: {e}"
@@ -1090,7 +1106,7 @@ async def mendeley_get_document_text(
             "text_available": False,
             "page_count": page_count,
         }
-        return build_tool_result(
+        return _document_text_result(
             (
                 f"The attached file for document {document_id} has no extractable "
                 "text layer. It is likely a scanned or image-only PDF, which would "
@@ -1119,7 +1135,7 @@ async def mendeley_get_document_text(
             "characters; set MENDELEY_MCP_MAX_TEXT_CHARS to adjust)"
         )
     title = metadata.get("title") or document_id
-    return build_tool_result(
+    return _document_text_result(
         f"Extracted text from {page_count} page(s) of '{title}'{note}.",
         structured_content,
         additional_text=body,

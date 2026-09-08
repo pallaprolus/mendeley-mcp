@@ -263,6 +263,7 @@ Use this when the user wants the model to read, summarize, or answer questions a
 
 - Accepts either a library `document_id` or a `catalog_id`
 - Downloads the attached PDF and extracts its text **server-side**, returning it as a readable text block and in the structured result's `text` field. Clients that expose only structured content receive the same text (see [#11](https://github.com/pallaprolus/mendeley-mcp/issues/11)). Both representations use the same truncation limit; the response carries the text twice for compatibility.
+- The structured result includes a `message` on every path, so explanations for missing files, scanned PDFs, and errors remain visible to structured-only clients.
 - Born-digital PDFs only; scanned or image-only PDFs have no text layer and are reported as such (they would need OCR)
 - Output is capped at 200,000 characters, with truncation flagged in the result (adjust with the `MENDELEY_MCP_MAX_TEXT_CHARS` environment variable)
 
