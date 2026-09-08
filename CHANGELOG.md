@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Include extracted PDF text in the structured result of
+  `mendeley_get_document_text` as well as its existing text block. This keeps
+  papers readable in clients that expose only structured content to the model
+  (issue #11). Both representations use the same text truncation limit.
+
 ## [0.5.0] - 2026-08-31 — MCP Python SDK v2
 
 ### Changed

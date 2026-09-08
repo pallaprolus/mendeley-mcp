@@ -1108,6 +1108,9 @@ async def mendeley_get_document_text(
         "page_count": page_count,
         "char_count": len(stripped),
         "truncated": truncated,
+        # Some clients expose only structuredContent to the model (#11).
+        # Keep the same bounded text here and in the existing text block.
+        "text": body,
     }
     note = ""
     if truncated:

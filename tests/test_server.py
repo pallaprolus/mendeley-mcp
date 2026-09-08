@@ -899,6 +899,7 @@ def test_mendeley_get_document_text_returns_extracted_text(monkeypatch):
     assert result.content[0].type == "text"
     assert result.content[1].type == "text"
     assert "MENDELEY_EXTRACT_OK" in result.content[1].text
+    assert result.structured_content["text"] == result.content[1].text
 
 
 def test_mendeley_get_document_text_reports_scanned_pdf(monkeypatch):
@@ -935,6 +936,7 @@ def test_mendeley_get_document_text_truncates_long_text(monkeypatch):
     assert result.structured_content["truncated"] is True
     assert len(result.content) == 2
     assert len(result.content[1].text) == 10
+    assert result.structured_content["text"] == result.content[1].text
     assert "truncated" in result.content[0].text
 
 

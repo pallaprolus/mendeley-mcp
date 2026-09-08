@@ -262,7 +262,7 @@ Use this to try downloading the first file Mendeley exposes for a library docume
 Use this when the user wants the model to read, summarize, or answer questions about a paper's contents.
 
 - Accepts either a library `document_id` or a `catalog_id`
-- Downloads the attached PDF and extracts its text **server-side**, returning it as a text block the model can read directly — unlike `mendeley_get_file_content`, this works regardless of whether the client supports embedded PDF resources
+- Downloads the attached PDF and extracts its text **server-side**, returning it as a readable text block and in the structured result's `text` field. Clients that expose only structured content receive the same text (see [#11](https://github.com/pallaprolus/mendeley-mcp/issues/11)). Both representations use the same truncation limit; the response carries the text twice for compatibility.
 - Born-digital PDFs only; scanned or image-only PDFs have no text layer and are reported as such (they would need OCR)
 - Output is capped at 200,000 characters, with truncation flagged in the result (adjust with the `MENDELEY_MCP_MAX_TEXT_CHARS` environment variable)
 
