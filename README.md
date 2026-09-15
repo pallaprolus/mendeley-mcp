@@ -53,6 +53,12 @@ pip install mendeley-mcp
 uv tool install mendeley-mcp
 ```
 
+> **Intel Macs.** The `cryptography` library, pulled in by the MCP SDK, stopped
+> publishing macOS x86_64 wheels at version 49. On Intel Macs this package pins
+> `cryptography` below 49 so installation works without a Rust toolchain. That
+> pinned version no longer receives upstream security fixes; Apple Silicon,
+> Linux, and Windows are unaffected and get the latest release.
+
 ### Using Docker
 
 ```bash

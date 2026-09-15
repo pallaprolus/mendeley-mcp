@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   response is validated before the live credentials change, and a storage
   failure keeps the usable live tokens and logs a warning without secrets.
 
+### Fixed
+- Installation on Intel Macs. `cryptography` (via the MCP SDK's `pyjwt[crypto]`)
+  dropped macOS x86_64 wheels at 49.0, so installs there tried to compile it from
+  source and failed without Rust. The package now pins `cryptography<49` on
+  macOS x86_64 only; other platforms are unaffected.
+
 ## [0.5.1] - 2026-09-07 — Structured-content compatibility
 
 ### Fixed

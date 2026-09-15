@@ -26,6 +26,12 @@ dependencies = [
     "keyring>=25.0.0",
     "click>=8.0.0",
     "pypdf>=4.0.0",
+    # cryptography (pulled in by mcp -> pyjwt[crypto]) stopped shipping macOS
+    # x86_64 wheels at 49.0; without the first line, Intel Macs need a Rust
+    # toolchain. The second line keeps every other platform on a current
+    # release; without it, uv's universal lock picks 48.x for everyone.
+    "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "cryptography>=49; sys_platform != 'darwin' or platform_machine != 'x86_64'",
 ]
 
 [project.optional-dependencies]

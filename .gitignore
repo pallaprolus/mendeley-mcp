@@ -84,3 +84,6 @@ Thumbs.db
 
 # Project specific
 *.log
+
+# uv lockfile (library-style repo; installs resolve fresh)
+uv.lock
