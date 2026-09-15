@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-15 — Token persistence and Intel Mac installs
+
 ### Changed
 - Saved logins now persist refreshed access and refresh tokens back to their
   original keyring or file storage, so a new server process starts with a
@@ -166,7 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents, citation formatting, and an OAuth CLI (`mendeley-auth`) with
   keyring-backed credential storage.
 
-[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.0...v0.4.1
