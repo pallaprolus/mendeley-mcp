@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Saved logins now persist refreshed access and refresh tokens back to their
+  original keyring or file storage, so a new server process starts with a
+  valid token instead of a 401-and-refresh round trip. Environment-provided
+  credentials remain in memory only. Verified live against the Mendeley API,
+  which currently returns the same refresh token on refresh.
+- Concurrent 401s within one server share a single refresh. The full token
+  response is validated before the live credentials change, and a storage
+  failure keeps the usable live tokens and logs a warning without secrets.
+
 ## [0.5.1] - 2026-09-07 — Structured-content compatibility
 
 ### Fixed

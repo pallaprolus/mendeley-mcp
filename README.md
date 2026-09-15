@@ -403,6 +403,18 @@ mendeley-auth show-env
 mendeley-auth logout
 ```
 
+### Refreshed credential storage
+
+When a saved login's access token expires, the server refreshes it and writes the
+new tokens back to the same place the login was stored: the system keyring, or the
+credentials file, which is replaced atomically with private permissions. The next
+server start therefore begins with a valid token instead of a refresh round trip.
+
+Credentials supplied through environment variables are never written anywhere;
+those deployments manage token durability themselves. If saving fails, the running
+session keeps its refreshed tokens and logs a warning without credential details,
+and the next start may need `mendeley-auth login` again.
+
 ## Development
 
 ### Setup
@@ -476,7 +488,7 @@ Run `mendeley-auth login` to authenticate.
 
 ### "Token expired"
 
-Your access token has expired. The server will attempt to refresh it automatically using your refresh token. If this fails, run `mendeley-auth login` again.
+Your access token has expired. The server refreshes it automatically using your refresh token and saves the new token to your keyring or credentials file. If this fails, run `mendeley-auth login` again.
 
 ### "401 Unauthorized"
 

@@ -80,6 +80,7 @@ def get_credentials() -> MendeleyCredentials:
             client_secret=saved.get("client_secret", ""),
             access_token=saved.get("access_token"),
             refresh_token=saved.get("refresh_token"),
+            persist_tokens=True,
         )
 
     raise ValueError(

@@ -13,6 +13,7 @@ import os
 import secrets
 import socketserver
 import sys
+import tempfile
 import threading
 import urllib.parse
 import webbrowser
@@ -125,6 +126,46 @@ def save_credentials(
     # Restrict file permissions on Unix
     if sys.platform != "win32":
         os.chmod(CREDENTIALS_FILE, 0o600)
+
+
+def save_refreshed_tokens(
+    client_id: str,
+    previous_refresh_token: str,
+    access_token: str,
+    refresh_token: str,
+) -> None:
+    """Update an existing login using its original storage backend.
+
+    Do not recreate a logged-out account or overwrite a different saved login.
+    The caller coordinates refreshes within its server process.
+    """
+    config = json.loads(CREDENTIALS_FILE.read_text())
+    if not isinstance(config, dict) or config.get("client_id") != client_id:
+        raise ValueError("Saved Mendeley login changed during token refresh.")
+    if config.get("use_keyring"):
+        if not KEYRING_AVAILABLE:
+            raise RuntimeError("The saved login requires keyring storage.")
+        stored_refresh = keyring.get_password("mendeley-mcp", "refresh_token")
+        if stored_refresh != previous_refresh_token:
+            raise ValueError("Saved Mendeley login changed during token refresh.")
+        # Save the rotating credential first so it survives an access-token write failure.
+        keyring.set_password("mendeley-mcp", "refresh_token", refresh_token)
+        keyring.set_password("mendeley-mcp", "access_token", access_token)
+        return
+    if config.get("refresh_token") != previous_refresh_token:
+        raise ValueError("Saved Mendeley login changed during token refresh.")
+    config.update(access_token=access_token, refresh_token=refresh_token)
+    # mkstemp creates a private file before any credential bytes are written.
+    fd, temporary = tempfile.mkstemp(dir=CREDENTIALS_FILE.parent, prefix=".credentials-")
+    try:
+        with os.fdopen(fd, "w") as output:
+            json.dump(config, output, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, CREDENTIALS_FILE)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def load_credentials() -> dict[str, Any] | None:

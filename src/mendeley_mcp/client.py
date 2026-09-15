@@ -4,6 +4,8 @@ Mendeley API client for interacting with the Mendeley REST API.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +30,7 @@ class MendeleyCredentials:
     client_secret: str
     access_token: str | None = None
     refresh_token: str | None = None
+    persist_tokens: bool = False
 
     @classmethod
     def from_env(cls) -> MendeleyCredentials:
@@ -135,6 +138,8 @@ class MendeleyClient:
 
     def __init__(self, credentials: MendeleyCredentials) -> None:
         self.credentials = credentials
+        self._refresh_lock = asyncio.Lock()
+        self._token_generation = 0
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> MendeleyClient:
@@ -260,8 +265,16 @@ class MendeleyClient:
             headers=self._content_type_headers(DOCUMENT_MEDIA_TYPE),
         )
 
-    async def refresh_access_token(self) -> str:
-        """Refresh the access token using the refresh token."""
+    async def refresh_access_token(self, *, expected_generation: int | None = None) -> str:
+        """Share a refresh among requests that used the same token generation."""
+        generation = self._token_generation if expected_generation is None else expected_generation
+        async with self._refresh_lock:
+            if generation != self._token_generation and self.credentials.access_token:
+                return self.credentials.access_token
+            return await self._refresh_access_token()
+
+    async def _refresh_access_token(self) -> str:
+        """Validate and persist a token pair while holding the refresh lock."""
         if not self.credentials.refresh_token:
             raise ValueError("No refresh token available.")
 
@@ -285,16 +298,34 @@ class MendeleyClient:
         data = self._json_object(response.json(), "token refresh")
 
         access_token = data.get("access_token")
-        if not isinstance(access_token, str):
+        if not isinstance(access_token, str) or not access_token.strip():
             raise ValueError("Token refresh did not return an access token.")
 
-        self.credentials.access_token = access_token
+        refresh_token = data.get("refresh_token", self.credentials.refresh_token)
+        if not isinstance(refresh_token, str) or not refresh_token.strip():
+            raise ValueError("Token refresh returned an invalid refresh token.")
 
-        refresh_token = data.get("refresh_token")
-        if refresh_token is not None:
-            if not isinstance(refresh_token, str):
-                raise ValueError("Token refresh returned an invalid refresh token.")
-            self.credentials.refresh_token = refresh_token
+        previous_refresh_token = self.credentials.refresh_token
+        self.credentials.access_token = access_token
+        self.credentials.refresh_token = refresh_token
+        self._token_generation += 1
+        if self.credentials.persist_tokens:
+            from .auth import save_refreshed_tokens
+
+            try:
+                await asyncio.to_thread(
+                    save_refreshed_tokens,
+                    self.credentials.client_id,
+                    previous_refresh_token,
+                    access_token,
+                    refresh_token,
+                )
+            except Exception:
+                # The live pair is usable even when durable storage fails. Never log secrets.
+                logging.getLogger(__name__).warning(
+                    "Refreshed Mendeley credentials could not be saved. "
+                    "This session can continue, but a restart may require mendeley-auth login."
+                )
 
         return access_token
 
@@ -306,6 +337,7 @@ class MendeleyClient:
         **kwargs: Any,
     ) -> httpx.Response:
         """Make an authenticated request, refreshing token if needed."""
+        generation = self._token_generation
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {self.credentials.access_token}"
         headers["Accept"] = accept
@@ -314,7 +346,7 @@ class MendeleyClient:
 
         # If unauthorized, try refreshing the token
         if response.status_code == 401 and self.credentials.refresh_token:
-            await self.refresh_access_token()
+            await self.refresh_access_token(expected_generation=generation)
             headers["Authorization"] = f"Bearer {self.credentials.access_token}"
             response = await self.client.request(method, path, headers=headers, **kwargs)
 
