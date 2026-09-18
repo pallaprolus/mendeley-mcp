@@ -120,6 +120,8 @@ def format_document(doc: Document) -> dict[str, Any]:
             else doc.abstract
         ),
         "identifiers": doc.identifiers,
+        "keywords": doc.keywords,
+        "tags": doc.tags,
         "has_pdf": doc.file_attached,
         "citation": doc.format_citation(),
     }
@@ -133,6 +135,18 @@ def _json_response(payload: Any) -> str:
 def _json_error_response(message: str) -> str:
     """Serialize an MCP error payload."""
     return _json_response({"error": message})
+
+
+def _string_list(values: list[str], field_label: str) -> list[str]:
+    """Validate a list of non-empty strings, trimming whitespace."""
+    if not isinstance(values, list):
+        raise ValueError(f"{field_label} must be a list of strings.")
+    cleaned: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field_label} must contain only non-empty strings.")
+        cleaned.append(value.strip())
+    return cleaned
 
 
 def _trimmed_input(value: str, field_label: str) -> str:
@@ -708,8 +722,9 @@ async def mendeley_remove_document_from_folder(
 @mcp.tool(
     title="Update Document",
     description=(
-        "Update bibliographic fields on an existing library document, such as title, "
-        "authors, year, source, abstract, or identifiers. Only supplied fields change."
+        "Update fields on an existing library document, such as title, authors, year, "
+        "source, abstract, identifiers, tags, or keywords. Only supplied fields change; "
+        "a supplied list of tags or keywords replaces the existing list."
     ),
 )
 async def mendeley_update_document(
@@ -721,6 +736,8 @@ async def mendeley_update_document(
     source: str | None = None,
     abstract: str | None = None,
     identifiers: dict[str, str] | None = None,
+    tags: list[str] | None = None,
+    keywords: list[str] | None = None,
 ) -> str:
     """
     Update fields on an existing document in your library.
@@ -734,6 +751,9 @@ async def mendeley_update_document(
         source: Journal/book name
         abstract: Document abstract
         identifiers: Dict with 'doi', 'pmid', 'isbn', etc.
+        tags: User tags. Replaces the document's current tags; pass [] to clear them.
+            To add a tag, read the current tags first and pass the combined list.
+        keywords: Author keywords. Same replace semantics as tags.
 
     Returns:
         JSON object with the updated document
@@ -755,6 +775,10 @@ async def mendeley_update_document(
             updates["abstract"] = abstract
         if identifiers is not None:
             updates["identifiers"] = identifiers
+        if tags is not None:
+            updates["tags"] = _string_list(tags, "tags")
+        if keywords is not None:
+            updates["keywords"] = _string_list(keywords, "keywords")
         if not updates:
             raise ValueError("At least one field to update must be provided.")
 

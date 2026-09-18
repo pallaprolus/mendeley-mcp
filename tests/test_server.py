@@ -969,3 +969,68 @@ def test_server_reports_the_package_version():
 
     assert server.__version__ == package_version("mendeley-mcp")
     assert server.mcp.version == server.__version__
+
+
+async def test_mendeley_update_document_sends_tags_and_keywords(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """Tags and keywords are trimmed, sent as lists, and echoed in the result."""
+    client, _ = patched_server_client
+    client.update_document.return_value = Document(
+        id="doc-123",
+        title="Tagged",
+        type="journal",
+        authors=[],
+        tags=["systematic-review", "screening"],
+        keywords=["residual learning"],
+    )
+
+    result = await server.mendeley_update_document(
+        document_id="doc-123",
+        tags=[" systematic-review ", "screening"],
+        keywords=["residual learning"],
+    )
+
+    payload = _decode_tool_result(result)
+    assert payload["tags"] == ["systematic-review", "screening"]
+    assert payload["keywords"] == ["residual learning"]
+    client.update_document.assert_awaited_once_with(
+        document_id="doc-123",
+        updates={
+            "tags": ["systematic-review", "screening"],
+            "keywords": ["residual learning"],
+        },
+    )
+
+
+async def test_mendeley_update_document_empty_tags_clears_them(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+) -> None:
+    """An empty list is a valid update that clears the field."""
+    client, _ = patched_server_client
+    client.update_document.return_value = Document(
+        id="doc-123", title="Untagged", type="journal", authors=[], tags=[]
+    )
+
+    result = await server.mendeley_update_document(document_id="doc-123", tags=[])
+
+    assert _decode_tool_result(result)["tags"] == []
+    client.update_document.assert_awaited_once_with(
+        document_id="doc-123", updates={"tags": []}
+    )
+
+
+@pytest.mark.parametrize("bad", [["ok", ""], ["ok", "   "], ["ok", 3], "not-a-list"])
+async def test_mendeley_update_document_rejects_invalid_tags(
+    patched_server_client: tuple[SimpleNamespace, AsyncMock],
+    bad: object,
+) -> None:
+    """Invalid tag lists fail before any request is made."""
+    client, _ = patched_server_client
+
+    result = await server.mendeley_update_document(document_id="doc-123", tags=bad)  # type: ignore[arg-type]
+
+    payload = _decode_tool_result(result)
+    assert "error" in payload
+    assert "tags" in str(payload["error"])
+    client.update_document.assert_not_awaited()

@@ -144,7 +144,7 @@ The Mendeley tools should now be available in Claude.
 | `mendeley_search_catalog` | Search Mendeley's global paper database |
 | `mendeley_get_by_doi` | Look up a paper by DOI |
 | `mendeley_add_document` | Add a new document to your library |
-| `mendeley_update_document` | Update bibliographic fields on an existing document |
+| `mendeley_update_document` | Update bibliographic fields, tags, or keywords on an existing document |
 | `mendeley_delete_document` | Permanently delete a document from your library |
 | `mendeley_create_folder` | Create a folder in your library, optionally under a parent folder or group |
 | `mendeley_rename_folder` | Rename an existing folder |
@@ -229,9 +229,10 @@ Use this to create a library entry from metadata you already have.
 
 Use this to fix or enrich an existing library entry.
 
-- Updates only the fields you supply (title, type, authors, year, source, abstract, identifiers)
+- Updates only the fields you supply (title, type, authors, year, source, abstract, identifiers, tags, keywords)
+- A supplied `tags` or `keywords` list replaces the existing list; pass `[]` to clear it. To add a tag, read the current tags with `mendeley_get_document` and pass the combined list. Mendeley stores tags as a set and returns them sorted, not in the order sent
 - Returns the document's state after the update
-- Useful for correcting a wrong year, adding a missing abstract, or fixing identifiers
+- Useful for correcting a wrong year, adding a missing abstract, fixing identifiers, or tagging papers during a literature review
 
 ### `mendeley_delete_document`
 

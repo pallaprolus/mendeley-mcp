@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `mendeley_update_document` accepts `tags` and `keywords`, so a document can be
+  tagged through the server, for example during a literature review. A supplied
+  list replaces the existing one. Search, list, and update results now include
+  `tags` and `keywords`. Requested by @HasiVS in
+  [#12](https://github.com/pallaprolus/mendeley-mcp/issues/12).
+
 ## [0.5.2] - 2026-09-15 — Token persistence and Intel Mac installs
 
 ### Changed
