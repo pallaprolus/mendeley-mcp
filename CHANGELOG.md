@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-18 — Tags and keywords on update
+
 ### Added
 - `mendeley_update_document` accepts `tags` and `keywords`, so a document can be
   tagged through the server, for example during a literature review. A supplied
   list replaces the existing one. Search, list, and update results now include
-  `tags` and `keywords`. Requested by @HasiVS in
-  [#12](https://github.com/pallaprolus/mendeley-mcp/issues/12).
+  `tags` and `keywords`. Requested by [@HasiVS](https://github.com/HasiVS) in
+  [#12](https://github.com/pallaprolus/mendeley-mcp/issues/12); verified live
+  against the Mendeley API, which stores tags as an unordered set.
+
+### Fixed
+- The README now documents the two MCP resources the server has always exposed,
+  `mendeley://library/recent` and `mendeley://library/folders`, and lists
+  contributors.
 
 ## [0.5.2] - 2026-09-15 — Token persistence and Intel Mac installs
 
@@ -175,7 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents, citation formatting, and an OAuth CLI (`mendeley-auth`) with
   keyring-backed credential storage.
 
-[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.4.1...v0.5.0
