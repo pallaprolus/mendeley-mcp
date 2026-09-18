@@ -156,6 +156,17 @@ The Mendeley tools should now be available in Claude.
 | `mendeley_get_file_content` | Download the first attached file for a library or catalog document |
 | `mendeley_get_document_text` | Extract the full text of a document's attached PDF so the model can read the paper |
 
+### Resources
+
+Besides the tools above, the server exposes two MCP resources. Resources take no
+arguments; a client that supports them lists them alongside the server and lets you
+attach one to a conversation as context, the way you would attach a file.
+
+| Resource | Contents |
+|----------|----------|
+| `mendeley://library/recent` | The 10 most recently modified documents, in the same format as `mendeley_list_documents` |
+| `mendeley://library/folders` | Every folder in the library with its `id`, `name`, and `parent_id` |
+
 ## Tool Reference
 
 ### `mendeley_search_library`
