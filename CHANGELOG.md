@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Tool results are now compact JSON instead of indented JSON. The data is
+  unchanged; the whitespace is gone, which cuts the tokens each result uses by
+  about 19% (measured on a real library: 4,336 to 3,509 tokens for
+  `mendeley_list_documents`).
+
 ## [0.6.0] - 2026-09-18 — Tags and keywords on update
 
 ### Added

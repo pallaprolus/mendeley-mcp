@@ -128,8 +128,8 @@ def format_document(doc: Document) -> dict[str, Any]:
 
 
 def _json_response(payload: Any) -> str:
-    """Serialize a tool response using the repository's JSON-string convention."""
-    return json.dumps(payload, indent=2)
+    """Serialize a tool response as compact JSON; indentation only costs tokens."""
+    return json.dumps(payload, separators=(",", ":"))
 
 
 def _json_error_response(message: str) -> str:
@@ -290,7 +290,7 @@ async def mendeley_search_library(
     try:
         documents = await client.search_library(query, limit=limit)
         results = [format_document(doc) for doc in documents]
-        return json.dumps(results, indent=2)
+        return _json_response(results)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -334,7 +334,7 @@ async def mendeley_get_document(
             "last_modified": doc.last_modified,
             "citation": doc.format_citation(),
         }
-        return json.dumps(result, indent=2)
+        return _json_response(result)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -376,7 +376,7 @@ async def mendeley_list_documents(
             sort=sort_by,
         )
         results = [format_document(doc) for doc in documents]
-        return json.dumps(results, indent=2)
+        return _json_response(results)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -407,7 +407,7 @@ async def mendeley_list_folders() -> str:
             }
             for folder in folders
         ]
-        return json.dumps(results, indent=2)
+        return _json_response(results)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -587,7 +587,7 @@ async def mendeley_search_catalog(
                     else None
                 ),
             })
-        return json.dumps(formatted, indent=2)
+        return _json_response(formatted)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -629,7 +629,7 @@ async def mendeley_get_by_doi(
             "keywords": result.get("keywords"),
             "link": result.get("link"),
         }
-        return json.dumps(formatted, indent=2)
+        return _json_response(formatted)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -681,7 +681,7 @@ async def mendeley_add_document(
 
     try:
         doc = await client.add_document(title=title, doc_type=doc_type, **kwargs)
-        return json.dumps(format_document(doc), indent=2)
+        return _json_response(format_document(doc))
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -1174,7 +1174,7 @@ async def get_recent_documents() -> str:
     try:
         documents = await client.get_documents(limit=10, sort="last_modified")
         results = [format_document(doc) for doc in documents]
-        return json.dumps(results, indent=2)
+        return _json_response(results)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -1189,7 +1189,7 @@ async def get_all_folders() -> str:
             {"id": f.id, "name": f.name, "parent_id": f.parent_id}
             for f in folders
         ]
-        return json.dumps(results, indent=2)
+        return _json_response(results)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
