@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-25 — Compact tool results
+
 ### Changed
 - Tool results are now compact JSON instead of indented JSON. The data is
   unchanged; the whitespace is gone, which cuts the tokens each result uses by
-  about 19% (measured on a real library: 4,336 to 3,509 tokens for
-  `mendeley_list_documents`).
+  about 19% (measured on a real library with the cl100k tokenizer: 4,336 to
+  3,509 tokens for `mendeley_list_documents`).
 
 ## [0.6.0] - 2026-09-18 — Tags and keywords on update
 
@@ -189,7 +191,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents, citation formatting, and an OAuth CLI (`mendeley-auth`) with
   keyring-backed credential storage.
 
-[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.0...v0.5.1
