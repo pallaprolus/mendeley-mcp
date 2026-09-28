@@ -20,6 +20,10 @@ FILE_MEDIA_TYPE = "application/vnd.mendeley-file.1+json"
 FOLDER_MEDIA_TYPE = "application/vnd.mendeley-folder.1+json"
 ANNOTATION_MEDIA_TYPE = "application/vnd.mendeley-annotation.1+json"
 BIBTEX_MEDIA_TYPE = "application/x-bibtex"
+# Largest page Mendeley accepts on list endpoints; limit=501 is rejected with 400.
+MAX_PAGE_LIMIT = 500
+# Stop following pagination links after this many pages rather than loop forever.
+MAX_PAGES = 100
 
 
 @dataclass
@@ -353,6 +357,34 @@ class MendeleyClient:
         response.raise_for_status()
         return response
 
+    async def _get_all_pages(
+        self,
+        path: str,
+        resource_name: str,
+        accept: str,
+        params: dict[str, Any],
+    ) -> list[Any]:
+        """GET a list endpoint and follow Mendeley's Link rel="next" pagination."""
+        items: list[Any] = []
+        url = path
+        page_params: dict[str, Any] | None = params
+        for _ in range(MAX_PAGES):
+            response = await self._request("GET", url, accept=accept, params=page_params)
+            items.extend(self._json_array(response.json(), resource_name))
+            next_url = response.links.get("next", {}).get("url")
+            if not next_url:
+                return items
+            # The bearer token rides along, so never follow a link off the API host.
+            if httpx.URL(next_url).host != httpx.URL(MENDELEY_API_BASE).host:
+                raise ValueError(
+                    f"Unexpected {resource_name} pagination link from Mendeley API."
+                )
+            # The next link already carries the marker, limit, and any filters.
+            url, page_params = next_url, None
+        raise ValueError(
+            f"Mendeley {resource_name} exceeded {MAX_PAGES} pages; stopping pagination."
+        )
+
     async def search_library(
         self,
         query: str,
@@ -402,12 +434,13 @@ class MendeleyClient:
         return Document.from_api(self._json_object(response.json(), "document"))
 
     async def get_folders(self) -> list[Folder]:
-        """Get all folders in the library."""
-        response = await self._request_folder_resource(
-            "GET",
+        """Get all folders in the library, following pagination."""
+        data = await self._get_all_pages(
             "/folders",
+            "folder list",
+            accept=FOLDER_MEDIA_TYPE,
+            params={"limit": MAX_PAGE_LIMIT},
         )
-        data = self._json_array(response.json(), "folder list")
         return [Folder.from_api(folder) for folder in data]
 
     async def get_folder(self, folder_id: str) -> Folder:

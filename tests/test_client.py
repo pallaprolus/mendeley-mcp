@@ -660,3 +660,102 @@ class TestGetFileContent:
 
         with pytest.raises(httpx.HTTPStatusError, match="server error"):
             await mendeley_client.get_file_content("doc-123")
+
+
+class TestFolderPagination:
+    """Tests for listing folders across Mendeley's Link-header pagination."""
+
+    @staticmethod
+    def _use_transport(mendeley_client, handler):
+        mendeley_client._client = httpx.AsyncClient(
+            base_url="https://api.mendeley.com",
+            transport=httpx.MockTransport(handler),
+        )
+
+    @staticmethod
+    def _folders(start, stop):
+        return [{"id": f"f{i}", "name": f"Folder {i}"} for i in range(start, stop)]
+
+    @pytest.mark.anyio
+    async def test_get_folders_follows_next_links(self, mendeley_client):
+        """Test that every page is fetched, not just the first."""
+        next_url = "https://api.mendeley.com/folders?marker=f19&limit=500"
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            if request.url.params.get("marker") is None:
+                return httpx.Response(
+                    200,
+                    json=self._folders(0, 20),
+                    headers={"Link": f'<{next_url}>; rel="next"'},
+                )
+            return httpx.Response(200, json=self._folders(20, 28))
+
+        self._use_transport(mendeley_client, handler)
+
+        folders = await mendeley_client.get_folders()
+
+        assert [f.id for f in folders] == [f"f{i}" for i in range(28)]
+        assert seen[0].url.params["limit"] == "500"
+        assert str(seen[1].url) == next_url
+        assert all(r.headers["Accept"] == FOLDER_MEDIA_TYPE for r in seen)
+
+    @pytest.mark.anyio
+    async def test_get_folders_single_page(self, mendeley_client):
+        """Test that a response without a next link makes one request."""
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200, json=self._folders(0, 6))
+
+        self._use_transport(mendeley_client, handler)
+
+        folders = await mendeley_client.get_folders()
+
+        assert len(folders) == 6
+        assert len(calls) == 1
+        assert calls[0].headers["Accept"] == FOLDER_MEDIA_TYPE
+
+    @pytest.mark.anyio
+    async def test_get_folders_refuses_off_host_next_link(self, mendeley_client):
+        """Test that the bearer token is never sent to a non-Mendeley host."""
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(
+                200,
+                json=self._folders(0, 2),
+                headers={"Link": '<https://evil.example/folders?marker=x>; rel="next"'},
+            )
+
+        self._use_transport(mendeley_client, handler)
+
+        with pytest.raises(ValueError, match="pagination link"):
+            await mendeley_client.get_folders()
+        assert len(calls) == 1
+
+    @pytest.mark.anyio
+    async def test_get_folders_stops_runaway_pagination(self, mendeley_client):
+        """Test that a next link that never ends does not loop forever."""
+        from mendeley_mcp.client import MAX_PAGES
+
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(
+                200,
+                json=self._folders(0, 1),
+                headers={
+                    "Link": '<https://api.mendeley.com/folders?marker=f0>; rel="next"'
+                },
+            )
+
+        self._use_transport(mendeley_client, handler)
+
+        with pytest.raises(ValueError, match="exceeded"):
+            await mendeley_client.get_folders()
+        assert len(calls) == MAX_PAGES
