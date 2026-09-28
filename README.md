@@ -548,4 +548,4 @@ This project is not affiliated with, endorsed by, or sponsored by Mendeley or El
 - [@roych98](https://github.com/roych98) — reported the MCP SDK 2.x install break, supplied the interim pin, and wrote the SDK v2 migration ([#8](https://github.com/pallaprolus/mendeley-mcp/pull/8))
 - [@im-alexandre](https://github.com/im-alexandre) — folder management tools, adapted from [#2](https://github.com/pallaprolus/mendeley-mcp/pull/2)
 - [@Storkholm](https://github.com/Storkholm) — reported and isolated the structured-content client behavior ([#11](https://github.com/pallaprolus/mendeley-mcp/issues/11))
-- [@HasiVS](https://github.com/HasiVS) — requested tags and keywords on document update ([#12](https://github.com/pallaprolus/mendeley-mcp/issues/12))
+- [@HasiVS](https://github.com/HasiVS) — requested tags and keywords on document update ([#12](https://github.com/pallaprolus/mendeley-mcp/issues/12)) and reported folder-list truncation ([#13](https://github.com/pallaprolus/mendeley-mcp/issues/13))

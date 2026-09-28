@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-27 — Complete folder lists
+
+### Fixed
+- `mendeley_list_folders` and the `mendeley://library/folders` resource now
+  return every folder. They previously returned only the first page of
+  Mendeley's results, 20 folders, with no sign that the rest were missing. The
+  client now requests the largest page the API allows and follows its
+  pagination links until the list is complete. Reported with a root-cause
+  analysis by [@HasiVS](https://github.com/HasiVS) in
+  [#13](https://github.com/pallaprolus/mendeley-mcp/issues/13); reproduced and
+  verified live against a 28-folder library, including nested folders.
+
 ## [0.6.1] - 2026-09-25 — Compact tool results
 
 ### Changed
