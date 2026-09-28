@@ -759,3 +759,105 @@ class TestFolderPagination:
         with pytest.raises(ValueError, match="exceeded"):
             await mendeley_client.get_folders()
         assert len(calls) == MAX_PAGES
+
+
+class TestDocumentPagination:
+    """Tests for listing and searching documents past a single page."""
+
+    @staticmethod
+    def _use_transport(mendeley_client, handler):
+        mendeley_client._client = httpx.AsyncClient(
+            base_url="https://api.mendeley.com",
+            transport=httpx.MockTransport(handler),
+        )
+
+    @staticmethod
+    def _docs(start, stop):
+        return [{"id": f"d{i}", "title": f"Doc {i}"} for i in range(start, stop)]
+
+    @staticmethod
+    def _paged_handler(seen, total):
+        """Serve `total` documents in pages sized by the request's limit."""
+
+        def handler(request):
+            seen.append(request)
+            size = int(request.url.params["limit"])
+            start = int(request.url.params.get("marker", "0"))
+            stop = min(start + size, total)
+            headers = {}
+            if stop < total:
+                next_url = request.url.copy_merge_params({"marker": str(stop)})
+                headers["Link"] = f'<{next_url}>; rel="next"'
+            docs = TestDocumentPagination._docs(start, stop)
+            return httpx.Response(200, json=docs, headers=headers)
+
+        return handler
+
+    @pytest.mark.anyio
+    async def test_get_documents_pages_past_500(self, mendeley_client):
+        """Test that a limit above the API's page size is filled across pages."""
+        seen = []
+        self._use_transport(mendeley_client, self._paged_handler(seen, 1200))
+
+        documents = await mendeley_client.get_documents(limit=600, sort="title", order="asc")
+
+        assert [d.id for d in documents] == [f"d{i}" for i in range(600)]
+        assert len(seen) == 2
+        assert seen[0].url.params["limit"] == "500"
+        # The next link carries the sort forward, so ordering holds across pages.
+        assert seen[1].url.params["sort"] == "title"
+        assert seen[1].url.params["marker"] == "500"
+        assert all(r.headers["Accept"] == DOCUMENT_MEDIA_TYPE for r in seen)
+
+    @pytest.mark.anyio
+    async def test_get_documents_returns_whole_library_below_limit(self, mendeley_client):
+        """Test that paging ends when the library runs out before the limit."""
+        seen = []
+        self._use_transport(mendeley_client, self._paged_handler(seen, 730))
+
+        documents = await mendeley_client.get_documents(limit=5000)
+
+        assert len(documents) == 730
+        assert len(seen) == 2
+
+    @pytest.mark.anyio
+    async def test_get_documents_small_limit_makes_one_request(self, mendeley_client):
+        """Test that a limit within one page requests exactly that many."""
+        seen = []
+        self._use_transport(mendeley_client, self._paged_handler(seen, 1200))
+
+        documents = await mendeley_client.get_documents(limit=50)
+
+        assert len(documents) == 50
+        assert len(seen) == 1
+        assert seen[0].url.params["limit"] == "50"
+
+    @pytest.mark.anyio
+    async def test_search_library_pages_in_hundreds(self, mendeley_client):
+        """Test that library search stays within the search page size of 100."""
+        seen = []
+        self._use_transport(mendeley_client, self._paged_handler(seen, 400))
+
+        documents = await mendeley_client.search_library("graph", limit=250)
+
+        assert [d.id for d in documents] == [f"d{i}" for i in range(250)]
+        assert [r.url.params["limit"] for r in seen] == ["100", "100", "100"]
+        assert all(r.url.params["query"] == "graph" for r in seen)
+
+    @pytest.mark.anyio
+    async def test_empty_page_ends_pagination(self, mendeley_client):
+        """Test that an empty page with a next link does not loop."""
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(
+                200,
+                json=[],
+                headers={"Link": '<https://api.mendeley.com/documents?marker=x>; rel="next"'},
+            )
+
+        self._use_transport(mendeley_client, handler)
+
+        assert await mendeley_client.get_documents(limit=1000) == []
+        assert len(calls) == 1

@@ -22,7 +22,9 @@ ANNOTATION_MEDIA_TYPE = "application/vnd.mendeley-annotation.1+json"
 BIBTEX_MEDIA_TYPE = "application/x-bibtex"
 # Largest page Mendeley accepts on list endpoints; limit=501 is rejected with 400.
 MAX_PAGE_LIMIT = 500
-# Stop following pagination links after this many pages rather than loop forever.
+# Search endpoints reject pages larger than 100.
+MAX_SEARCH_PAGE_LIMIT = 100
+# Stop following an open-ended pagination chain after this many pages.
 MAX_PAGES = 100
 
 
@@ -363,17 +365,32 @@ class MendeleyClient:
         resource_name: str,
         accept: str,
         params: dict[str, Any],
+        max_items: int | None = None,
     ) -> list[Any]:
-        """GET a list endpoint and follow Mendeley's Link rel="next" pagination."""
+        """GET a list endpoint and follow Mendeley's Link rel="next" pagination.
+
+        Stops after max_items results when given, otherwise when the list ends.
+        """
         items: list[Any] = []
         url = path
         page_params: dict[str, Any] | None = params
-        for _ in range(MAX_PAGES):
+        pages = 0
+        while True:
             response = await self._request("GET", url, accept=accept, params=page_params)
-            items.extend(self._json_array(response.json(), resource_name))
+            page = self._json_array(response.json(), resource_name)
+            items.extend(page)
+            pages += 1
+            if max_items is not None and len(items) >= max_items:
+                return items[:max_items]
             next_url = response.links.get("next", {}).get("url")
-            if not next_url:
+            # An empty page means no progress; treat it as the end of the list.
+            if not next_url or not page:
                 return items
+            # max_items bounds a capped fetch; guard only open-ended ones.
+            if max_items is None and pages >= MAX_PAGES:
+                raise ValueError(
+                    f"Mendeley {resource_name} exceeded {MAX_PAGES} pages; stopping pagination."
+                )
             # The bearer token rides along, so never follow a link off the API host.
             if httpx.URL(next_url).host != httpx.URL(MENDELEY_API_BASE).host:
                 raise ValueError(
@@ -381,22 +398,20 @@ class MendeleyClient:
                 )
             # The next link already carries the marker, limit, and any filters.
             url, page_params = next_url, None
-        raise ValueError(
-            f"Mendeley {resource_name} exceeded {MAX_PAGES} pages; stopping pagination."
-        )
 
     async def search_library(
         self,
         query: str,
         limit: int = 20,
     ) -> list[Document]:
-        """Search documents in the user's library."""
-        response = await self._request_document_resource(
-            "GET",
+        """Search documents in the user's library, paging up to limit results."""
+        data = await self._get_all_pages(
             "/search/documents",
-            params={"query": query, "limit": limit},
+            "document search",
+            accept=DOCUMENT_MEDIA_TYPE,
+            params={"query": query, "limit": min(limit, MAX_SEARCH_PAGE_LIMIT)},
+            max_items=limit,
         )
-        data = self._json_array(response.json(), "document search")
         return [Document.from_api(doc) for doc in data]
 
     async def get_documents(
@@ -406,9 +421,9 @@ class MendeleyClient:
         sort: str = "last_modified",
         order: str = "desc",
     ) -> list[Document]:
-        """Get documents from the library or a specific folder."""
+        """Get documents from the library or a folder, paging up to limit results."""
         params: dict[str, Any] = {
-            "limit": limit,
+            "limit": min(limit, MAX_PAGE_LIMIT),
             "sort": sort,
             "order": order,
             "view": "all",
@@ -416,12 +431,13 @@ class MendeleyClient:
         if folder_id:
             params["folder_id"] = folder_id
 
-        response = await self._request_document_resource(
-            "GET",
+        data = await self._get_all_pages(
             "/documents",
+            "document list",
+            accept=DOCUMENT_MEDIA_TYPE,
             params=params,
+            max_items=limit,
         )
-        data = self._json_array(response.json(), "document list")
         return [Document.from_api(doc) for doc in data]
 
     async def get_document(self, document_id: str) -> Document:

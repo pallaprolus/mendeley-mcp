@@ -279,13 +279,12 @@ async def mendeley_search_library(
 
     Args:
         query: Search query (searches title, authors, abstract, notes)
-        limit: Maximum number of results (default: 20, max: 100)
+        limit: Maximum number of results (default: 20)
 
     Returns:
         JSON array of matching documents with metadata
     """
     client = await get_client()
-    limit = min(limit, 100)
 
     try:
         documents = await client.search_library(query, limit=limit)
@@ -356,14 +355,13 @@ async def mendeley_list_documents(
 
     Args:
         folder_id: Optional folder ID to filter by
-        limit: Maximum number of results (default: 50, max: 100)
+        limit: Maximum number of results (default: 50)
         sort_by: Sort field - 'last_modified', 'created', or 'title'
 
     Returns:
         JSON array of documents
     """
     client = await get_client()
-    limit = min(limit, 100)
 
     valid_sorts = ["last_modified", "created", "title"]
     if sort_by not in valid_sorts:
