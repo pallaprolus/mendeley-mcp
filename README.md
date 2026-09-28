@@ -176,6 +176,7 @@ Use this when the paper should already exist in the user's library.
 - Searches title, authors, abstract, and notes
 - Returns concise metadata, formatted citation text, and `has_pdf`
 - Best first step before falling back to the catalog
+- Returns up to `limit` results (default 20), paging through Mendeley's results as needed
 
 ### `mendeley_get_document`
 
@@ -191,6 +192,7 @@ Use this to browse the library instead of searching by keyword.
 
 - Can scope results to a specific `folder_id`
 - Supports sorting by `last_modified`, `created`, or `title`
+- Returns up to `limit` documents (default 50), paging through the library as needed, so a large `limit` returns the whole library
 - Useful for reviewing recent additions or the contents of one collection
 
 ### `mendeley_list_folders`

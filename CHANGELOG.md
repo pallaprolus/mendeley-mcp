@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-09-27 — No more 100-document cap
+
+### Fixed
+- `mendeley_list_documents` and `mendeley_search_library` now return up to the
+  requested `limit`, paging through Mendeley's results as needed. They
+  previously capped every call at 100 results with no way to reach the rest of
+  a larger library. The cap came from this server, not from Mendeley; the
+  client now uses the largest page each endpoint accepts (500 for listing, 100
+  for search) and follows the pagination links from 0.6.2. Sort order holds
+  across pages. Raised by [@HasiVS](https://github.com/HasiVS) in
+  [#13](https://github.com/pallaprolus/mendeley-mcp/issues/13).
+  `mendeley_search_catalog` keeps its maximum of 100, which is Mendeley's own
+  page limit for catalog search.
+
 ## [0.6.2] - 2026-09-27 — Complete folder lists
 
 ### Fixed
