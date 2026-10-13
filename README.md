@@ -368,7 +368,7 @@ including whitespace. The overall text limit applies to both compatibility
 representations. Page numbers refer to PDF positions,
 not printed page labels. Blank selected pages can have no extractable text.
 
-**Migration from 0.7.0 (planned for 0.8.0):** `pages[].text` is removed. Obtain
+**Migration from 0.7.0 to 0.8.0:** `pages[].text` is removed. Obtain
 a page's returned text from the top-level `text` and its offsets:
 
 ```python

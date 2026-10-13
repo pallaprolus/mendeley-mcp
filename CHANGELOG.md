@@ -7,12 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-13 — Bounded PDF responses and safer search
+
 ### Changed
 - **Breaking:** Removed `pages[].text`, introduced in 0.7.0, from PDF reading
   results. Page entries now carry `start_offset` and `end_offset` into the
   returned `text`. Migrate Python clients to `text[start_offset:end_offset]`;
   JavaScript clients must slice `Array.from(text)` because offsets count Unicode
-  code points, not UTF-16 units. This incompatible field change is reserved for the **0.8.0** minor release.
+  code points, not UTF-16 units.
 
 ### Fixed
 - Reading offsets and truncation flags account for trimming and page separators.
