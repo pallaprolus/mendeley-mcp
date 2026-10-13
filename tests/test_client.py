@@ -897,3 +897,109 @@ async def test_signed_download_errors_do_not_expose_url(mendeley_client, monkeyp
         await client.get_file_content("doc-1")
     assert "secret" not in str(caught.value)
     assert "PDF download failed" in str(caught.value)
+
+
+@pytest.mark.anyio
+async def test_real_httpx_request_redacts_signed_query(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200))
+        ) as client:
+            await client.get("https://example.com/paper.pdf?X-Amz-Signature=actual-secret")
+    assert "paper.pdf" in caplog.text  # ensure the actual request produced a log
+    assert "actual-secret" not in caplog.text
+    assert "X-Amz-Signature" not in caplog.text
+    assert "REDACTED" in caplog.text
+
+
+@pytest.mark.parametrize("style", ["changed_format", "preformatted", "mapping"])
+def test_query_redaction_does_not_depend_on_log_wording(caplog, style):
+    import logging
+
+    url = "https://example.com/paper.pdf?token=private-secret"
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        logger = logging.getLogger("httpx")
+        if style == "changed_format":
+            logger.info("Downloaded %s with status %s", httpx.URL(url), 200)
+        elif style == "mapping":
+            logger.info("Fetched %(url)s", {"url": url})
+        else:
+            logger.info("Fetched " + url)
+    assert "private-secret" not in caplog.text
+    assert "token=" not in caplog.text
+    assert "paper.pdf?REDACTED" in caplog.text
+
+
+def test_malformed_httpx_log_cannot_throw_or_leak(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        logging.getLogger("httpx").info(
+            "Fetched %s %s", "https://example.com/paper.pdf?token=malformed-secret"
+        )
+    assert "could not be sanitized" in caplog.text
+    assert "malformed-secret" not in caplog.text
+
+
+def test_httpx_exception_and_stack_text_are_redacted(caplog):
+    import logging
+
+    logger = logging.getLogger("httpx")
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        try:
+            raise RuntimeError("https://example.com/paper.pdf?token=exception-secret")
+        except RuntimeError:
+            logger.exception("Download failed")
+        record = logging.LogRecord("httpx", logging.INFO, __file__, 1, "Stack", (), None)
+        record.stack_info = "https://example.com/paper.pdf?token=stack-secret"
+        logger.handle(record)
+        cached = logging.LogRecord("httpx", logging.INFO, __file__, 1, "Cached", (), None)
+        cached.exc_text = "https://example.com/paper.pdf?token=cached-secret"
+        logger.handle(cached)
+    for secret in ["exception-secret", "stack-secret", "cached-secret"]:
+        assert secret not in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "REDACTED" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_actual_signed_redirect_download_logs_and_auth(mendeley_client, monkeypatch, caplog):
+    import logging
+
+    assert mendeley_client.credentials.access_token == "test-access-token"
+    signed_url = "https://files.example.com/paper.pdf?X-Amz-Signature=redirect-secret"
+    actual_client = httpx.AsyncClient
+    calls = []
+
+    def handler(request):
+        calls.append((request.url.host, request.url.path))
+        if request.url.host == "api.mendeley.com":
+            assert request.headers.get("Authorization") == (
+                f"Bearer {mendeley_client.credentials.access_token}"
+            )
+            if request.url.path == "/files":
+                return httpx.Response(200, json=[{"id": "file-1"}])
+            assert request.url.path == "/files/file-1"
+            return httpx.Response(303, headers={"Location": signed_url})
+        assert request.url.host == "files.example.com"
+        assert "Authorization" not in request.headers
+        return httpx.Response(200, content=b"%PDF-test-fixture")
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return actual_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        async with mendeley_client:
+            assert await mendeley_client.get_file_content("doc-1") == b"%PDF-test-fixture"
+    assert calls == [
+        ("api.mendeley.com", "/files"),
+        ("api.mendeley.com", "/files/file-1"),
+        ("files.example.com", "/paper.pdf"),
+    ]
+    assert "303 See Other" in caplog.text
+    assert "paper.pdf?REDACTED" in caplog.text
+    assert "redirect-secret" not in caplog.text

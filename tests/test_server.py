@@ -1098,3 +1098,329 @@ def test_search_no_match_and_scanned_pdf(monkeypatch):
     result = asyncio.run(server.mendeley_search_document_text("doc-text", "target"))
     assert not result.is_error
     assert result.structured_content["text_available"] is False
+
+
+@pytest.mark.parametrize(
+    "texts, cap, expected, offsets, flags",
+    [
+        (("ABCDE", "FGHIJ"), 10, "ABCDE\n\nFGH", [(0, 5), (7, 10)], [False, True]),
+        (("ABCDE", "FGHIJ"), 6, "ABCDE\n", [(0, 5), (6, 6)], [False, True]),
+        (("  ABC", "DEF  "), 8, "ABC\n\nDEF", [(0, 3), (5, 8)], [False, False]),
+        (("  ABC", "DEF  "), 6, "ABC\n\nD", [(0, 3), (5, 6)], [False, True]),
+        (("ABC", "", "DEF"), 6, "ABC\n\n\n", [(0, 3), (5, 5), (6, 6)], [False, False, True]),
+    ],
+)
+def test_reading_offsets_share_canonical_truncation(
+    monkeypatch, texts, cap, expected, offsets, flags,
+):
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf(*texts))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    monkeypatch.setattr(server, "MAX_EXTRACTED_TEXT_CHARS", cap)
+    result = asyncio.run(server.mendeley_get_document_text("doc-text"))
+    content = result.structured_content
+    assert content["text"] == result.content[1].text == expected
+    assert [(p["start_offset"], p["end_offset"]) for p in content["pages"]] == offsets
+    assert [p["truncated"] for p in content["pages"]] == flags
+    assert content["truncated"] == any(flags)
+    assert all("text" not in p for p in content["pages"])
+
+
+def test_page_range_offsets_index_only_returned_text(monkeypatch):
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf("FIRST", "  SECOND  ", "THIRD"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    content = asyncio.run(server.mendeley_get_document_text("doc-text", 2, 2)).structured_content
+    assert content["text"] == "SECOND"
+    assert content["pages"] == [
+        {"page_number": 2, "start_offset": 0, "end_offset": 6, "truncated": False}
+    ]
+
+
+def test_reading_serialization_keeps_only_two_text_copies(monkeypatch):
+    marker = "UNIQUE_PDF_PAYLOAD_" + "A" * 5000
+
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf(marker, marker))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    result = asyncio.run(server.mendeley_get_document_text("doc-text"))
+    wire = json.loads(result.model_dump_json(by_alias=True, exclude_none=True))
+    structured = wire["structuredContent"]
+    assert json.dumps(structured).count(marker) == 2  # one occurrence per page, in text only
+    assert result.model_dump_json().count(marker) == 4  # two compatibility representations
+    assert len(json.dumps(structured)) < len(json.dumps(structured["text"])) + 1500
+    assert all("text" not in page for page in structured["pages"])
+
+
+def test_blank_selected_page_does_not_diagnose_whole_pdf(monkeypatch):
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf("Readable first page", "", "Readable third page"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    result = asyncio.run(server.mendeley_get_document_text("doc-text", 2, 2))
+    assert not result.is_error
+    assert result.structured_content["text_available"] is False
+    assert result.structured_content["page_start"] == result.structured_content["page_end"] == 2
+    assert "may be blank" in result.structured_content["message"]
+    assert "likely a scanned" not in result.structured_content["message"]
+
+
+@pytest.mark.parametrize("cap", [1, 5, 6, 7, 12, 20, 200])
+def test_search_budget_preserves_complete_match(monkeypatch, cap):
+    text = "0123456789 TARGET abcdefghijklmnopqrstuvwxyz TARGET suffix"
+
+    async def fake_get_client():
+        return TextDownloadClient(_make_pdf(text))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    monkeypatch.setattr(server, "MAX_EXTRACTED_TEXT_CHARS", cap)
+    content = asyncio.run(
+        server.mendeley_search_document_text("doc-text", "target", context_chars=20)
+    ).structured_content
+    assert content["total_matches"] == 2
+    assert sum(len(m["text"]) for m in content["matches"]) <= cap
+    for match in content["matches"]:
+        relative_start = match["match_start"] - match["passage_start"]
+        relative_end = match["match_end"] - match["passage_start"]
+        assert 0 <= relative_start < relative_end <= len(match["text"])
+        assert match["text"][relative_start:relative_end] == "TARGET"
+        start = match["passage_start"]
+        assert match["text"] == text[start:start + len(match["text"])]
+    if cap < 6:
+        assert content["matches"] == []
+        assert content["truncated"]
+    if cap == 6:
+        assert content["matches"][0]["text"] == "TARGET"
+
+
+@pytest.mark.parametrize("mode", ["download", "invalid", "extract", "missing", "blank"])
+def test_reading_and_search_report_equivalent_source_errors(monkeypatch, mode):
+    class Client(TextDownloadClient):
+        async def get_file_content(self, document_id):
+            if mode == "download":
+                raise RuntimeError("Download unavailable")
+            if mode == "missing":
+                return None
+            if mode == "invalid":
+                return b"not a PDF"
+            return await super().get_file_content(document_id)
+
+    async def fake_get_client():
+        return Client(_make_pdf("" if mode == "blank" else "Some text"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    if mode == "extract":
+        from pypdf._page import PageObject
+
+        def fail_extract(self):
+            raise ValueError("Broken page stream")
+
+        monkeypatch.setattr(PageObject, "extract_text", fail_extract)
+    reading = asyncio.run(server.mendeley_get_document_text("doc-text"))
+    search = asyncio.run(server.mendeley_search_document_text("doc-text", "target"))
+    for result in (reading, search):
+        content = result.structured_content
+        assert content["document_id"] == "doc-text"
+        assert content["title"] == "Readable Paper"
+        assert content["identifiers"]["doi"] == "10.1234/readable"
+        assert content["text_available"] is False
+        assert content["file_available"] is (mode not in {"download", "missing"})
+        assert result.is_error is (mode in {"download", "invalid", "extract"})
+        if mode in {"download", "invalid", "extract"}:
+            assert content["error_stage"] == ("download" if mode == "download" else "extraction")
+
+
+def test_non_bmp_offsets_are_unicode_code_points(monkeypatch):
+    from pypdf._page import PageObject
+
+    texts = ["𝑥A", "😀TARGET", "TAIL"]
+
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf("page1", "page2", "page3"))
+
+    # Supply exact extracted text so a PDF extractor cannot normalize away the
+    # whitespace/Unicode boundary this test is intended to exercise.
+    extracted = iter(texts)
+    monkeypatch.setattr(PageObject, "extract_text", lambda self: next(extracted))
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    result = asyncio.run(server.mendeley_get_document_text("doc-text")).structured_content
+    assert result["text"] == "𝑥A\n\n😀TARGET\n\nTAIL"
+    assert [(p["start_offset"], p["end_offset"]) for p in result["pages"]] == [
+        (0, 2), (4, 11), (13, 17),
+    ]
+    assert [result["text"][p["start_offset"]:p["end_offset"]] for p in result["pages"]] == texts
+    extracted = iter(texts)
+    match = asyncio.run(
+        server.mendeley_search_document_text("doc-text", "TARGET", context_chars=1)
+    ).structured_content["matches"][0]
+    assert match["page_number"] == 2
+    assert (match["match_start"], match["match_end"], match["passage_start"]) == (1, 7, 0)
+    assert match["text"] == "😀TARGET"
+
+
+@pytest.mark.parametrize(
+    "texts, cap, expected, offsets, flags",
+    [
+        (["", "  ", "ABC"], 2, "AB", [(0, 0), (0, 0), (0, 2)], [False, False, True]),
+        (["ABC", "   ", "DEF"], 3, "ABC", [(0, 3), (3, 3), (3, 3)], [False, True, True]),
+        (["𝑥A", "😀TARGET", "TAIL"], 10, "𝑥A\n\n😀TARGE",
+         [(0, 2), (4, 10), (10, 10)], [False, True, True]),
+    ],
+)
+def test_exact_extracted_text_boundaries(monkeypatch, texts, cap, expected, offsets, flags):
+    from pypdf._page import PageObject
+
+    extracted = iter(texts)
+    monkeypatch.setattr(PageObject, "extract_text", lambda self: next(extracted))
+
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf("one", "two", "three"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    monkeypatch.setattr(server, "MAX_EXTRACTED_TEXT_CHARS", cap)
+    result = asyncio.run(server.mendeley_get_document_text("doc-text")).structured_content
+    assert result["text"] == expected
+    assert [(p["start_offset"], p["end_offset"]) for p in result["pages"]] == offsets
+    assert [p["truncated"] for p in result["pages"]] == flags
+    assert result["truncated"] == any(flags)
+
+
+def test_search_budget_spans_pages_and_counts_omitted_matches(monkeypatch):
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf("TARGET", "target", "TARGET"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    monkeypatch.setattr(server, "MAX_EXTRACTED_TEXT_CHARS", 12)
+    result = asyncio.run(
+        server.mendeley_search_document_text("doc-text", "target", context_chars=0)
+    ).structured_content
+    assert result["total_matches"] == 3
+    assert [(m["page_number"], m["text"]) for m in result["matches"]] == [
+        (1, "TARGET"), (2, "target"),
+    ]
+    assert result["truncated"] is True
+
+
+@pytest.mark.parametrize("mode", ["validation", "authentication", "range"])
+def test_error_payloads_identify_document_and_stage(monkeypatch, mode):
+    async def fake_get_client():
+        if mode == "authentication":
+            raise ValueError("Credentials unavailable")
+        return TextDownloadClient(_make_pdf("page"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    reading = asyncio.run(server.mendeley_get_document_text(
+        "doc-text", page_start=0 if mode == "validation" else 2 if mode == "range" else None,
+    ))
+    results = [reading]
+    if mode != "range":
+        results.append(asyncio.run(server.mendeley_search_document_text(
+            "doc-text", "" if mode == "validation" else "page",
+        )))
+    for result in results:
+        content = result.structured_content
+        assert result.is_error
+        assert content["document_id"] == "doc-text"
+        assert content["error_stage"] == ("validation" if mode == "range" else mode)
+        assert content["text_available"] is False
+        assert content["file_available"] is (True if mode == "range" else None)
+
+
+@pytest.mark.parametrize("stage", ["download", "extraction"])
+def test_empty_exception_messages_preserve_exception_name(monkeypatch, stage):
+    class Client(TextDownloadClient):
+        async def get_file_content(self, document_id):
+            if stage == "download":
+                raise RuntimeError()
+            return await super().get_file_content(document_id)
+
+    async def fake_get_client():
+        return Client(_make_pdf("page"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    if stage == "extraction":
+        from pypdf._page import PageObject
+
+        def fail_extract(self):
+            raise RuntimeError()
+
+        monkeypatch.setattr(PageObject, "extract_text", fail_extract)
+    for result in [
+        asyncio.run(server.mendeley_get_document_text("doc-text")),
+        asyncio.run(server.mendeley_search_document_text("doc-text", "page")),
+    ]:
+        assert result.is_error
+        assert "RuntimeError" in result.structured_content["message"]
+
+
+@pytest.mark.parametrize("value, expected", [(None, 123), ("5", 5), (" 9 ", 9)])
+def test_positive_output_limit_configuration(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("MENDELEY_MCP_MAX_TEXT_CHARS", raising=False)
+    else:
+        monkeypatch.setenv("MENDELEY_MCP_MAX_TEXT_CHARS", value)
+    assert server._env_output_limit("MENDELEY_MCP_MAX_TEXT_CHARS", 123) == expected
+
+
+@pytest.mark.parametrize("name, value, requirement", [
+    ("MENDELEY_MCP_MAX_TEXT_CHARS", "0", "a positive integer"),
+    ("MENDELEY_MCP_MAX_TEXT_CHARS", "-5", "a positive integer"),
+    ("MENDELEY_MCP_MAX_TEXT_CHARS", "not-an-integer", "a positive integer"),
+    ("MENDELEY_MCP_MAX_FILE_BYTES", "-5", "an integer greater than or equal to zero"),
+    ("MENDELEY_MCP_MAX_FILE_BYTES", "not-an-integer", "an integer greater than or equal to zero"),
+])
+def test_invalid_output_limit_rejected_at_startup(monkeypatch, name, value, requirement):
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["MENDELEY_MCP_MAX_TEXT_CHARS"] = "10"
+    env["MENDELEY_MCP_MAX_FILE_BYTES"] = "10"
+    env[name] = value
+    result = subprocess.run(
+        [sys.executable, "-c", "from mendeley_mcp import server"],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode != 0
+    assert f"{name} must be {requirement}" in result.stderr
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_zero_file_limit_keeps_metadata_only_mode(monkeypatch, empty):
+    monkeypatch.setenv("MENDELEY_MCP_MAX_FILE_BYTES", "0")
+    limit = server._env_output_limit("MENDELEY_MCP_MAX_FILE_BYTES", 123, allow_zero=True)
+    assert limit == 0
+    monkeypatch.setattr(server, "MAX_EMBEDDED_FILE_BYTES", limit)
+    pdf = b"" if empty else _make_pdf("readable")
+
+    async def fake_get_client():
+        return TextDownloadClient(pdf)
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    result = asyncio.run(server.mendeley_get_file_content("doc-text"))
+    assert not result.is_error
+    assert result.structured_content["file_available"] is True
+    assert result.structured_content["size_bytes"] == len(pdf)
+    assert all(block.type == "text" for block in result.content)
+    assert "embedding is disabled" in result.content[0].text
+
+
+def test_zero_file_limit_is_valid_at_startup(monkeypatch):
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["MENDELEY_MCP_MAX_FILE_BYTES"] = "0"
+    env["MENDELEY_MCP_MAX_TEXT_CHARS"] = "10"
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "from mendeley_mcp import server; print(server.MAX_EMBEDDED_FILE_BYTES)"],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0"

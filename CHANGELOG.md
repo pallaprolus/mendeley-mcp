@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-13 — Bounded PDF responses and safer search
+
+### Changed
+- **Breaking:** Removed `pages[].text`, introduced in 0.7.0, from PDF reading
+  results. Page entries now carry `start_offset` and `end_offset` into the
+  returned `text`. Migrate Python clients to `text[start_offset:end_offset]`;
+  JavaScript clients must slice `Array.from(text)` because offsets count Unicode
+  code points, not UTF-16 units.
+
+### Fixed
+- Reading offsets and truncation flags account for trimming and page separators.
+- Search passages preserve the complete matched phrase when reducing context;
+  passages that cannot fit are omitted while retaining the total match count.
+- Reading and search share source-aware download and extraction errors; blank
+  selected pages no longer imply that an entire PDF requires OCR.
+- URL-query redaction no longer depends on HTTPX's exact log wording, verified
+  with real HTTPX requests as well as alternate message formats. Exception and
+  stack text are also sanitized; malformed records are replaced without throwing
+  or exposing their original contents.
+- Non-positive text limits, negative file limits, and malformed limits are
+  rejected at startup. A zero file limit still disables embedding and returns
+  file metadata, including for an empty attachment. Negative file limits previously
+  also suppressed embedding; they now fail at startup. Use `0` instead.
+- Validation/authentication errors carry document IDs and consistent availability
+  fields (`file_available: null` means unknown), and empty exception messages
+  retain the exception class name.
+
 ## [0.7.0] - 2026-10-12 — Page-aware PDF reading and search
 
 ### Added
@@ -230,7 +257,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents, citation formatting, and an OAuth CLI (`mendeley-auth`) with
   keyring-backed credential storage.
 
-[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.6.3...v0.7.0
 [0.6.1]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/pallaprolus/mendeley-mcp/compare/v0.5.1...v0.5.2

@@ -137,3 +137,25 @@ def test_stdio_startup_failure_includes_stderr():
     with pytest.raises(AssertionError, match="startup diagnostic"):
         with rpc_server("raise RuntimeError('startup diagnostic')"):
             pytest.fail("Broken server should not initialize")
+
+
+def test_page_offsets_survive_stdio_serialization_without_duplicate_text():
+    script = """
+from tests.test_server import TextDownloadClient, _multipage_pdf
+from mendeley_mcp import server
+async def get_client():
+    return TextDownloadClient(_multipage_pdf('ABCDE', 'FGHIJ'))
+server.get_client = get_client
+server.MAX_EXTRACTED_TEXT_CHARS = 10
+server.mcp.run()
+"""
+    with rpc_server(script) as request:
+        result = request("tools/call", {
+            "name": "mendeley_get_document_text", "arguments": {"document_id": "doc-text"},
+        })
+    content = result["structuredContent"]
+    assert content["text"] == result["content"][1]["text"] == "ABCDE\n\nFGH"
+    assert content["pages"] == [
+        {"page_number": 1, "start_offset": 0, "end_offset": 5, "truncated": False},
+        {"page_number": 2, "start_offset": 7, "end_offset": 10, "truncated": True},
+    ]
