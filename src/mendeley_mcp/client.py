@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import re
+import traceback
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,16 +33,36 @@ MAX_PAGES = 100
 class _RedactRequestQuery(logging.Filter):
     """Keep signed download credentials out of HTTPX request logs."""
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        # Sanitize the rendered message, regardless of HTTPX's format string or
-        # whether the URL arrived as a URL object, string argument, or message.
-        record.msg = re.sub(
+    @staticmethod
+    def _redact(text: str) -> str:
+        return re.sub(
             r"https?://[^\s\"'<>]+",
             lambda match: match.group().split("?", 1)[0] + "?REDACTED"
             if "?" in match.group() else match.group(),
-            record.getMessage(),
+            text,
         )
-        record.args = ()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Render independently of HTTPX's wording, including exception/stack
+        # text which handlers append separately from the message.
+        try:
+            record.msg = self._redact(record.getMessage())
+            record.args = ()
+            exception_text = record.exc_text
+            if exception_text is None and record.exc_info:
+                exception_text = "".join(traceback.format_exception(*record.exc_info))
+            record.exc_text = self._redact(exception_text) if exception_text else None
+            record.exc_info = None
+            if record.stack_info:
+                record.stack_info = self._redact(record.stack_info)
+        except Exception:
+            # Fail closed: neither leak the original record nor let a malformed
+            # log message raise into the request that generated it.
+            record.msg = "HTTPX log omitted because it could not be sanitized."
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
         return True
 
 

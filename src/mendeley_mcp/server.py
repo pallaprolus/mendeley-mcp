@@ -40,17 +40,21 @@ except PackageNotFoundError:  # running from a source tree with no install
 # reports, so it has to be this package's version rather than the SDK's.
 mcp = MCPServer("mendeley", version=__version__)
 
-# Embedded files are base64-encoded into the tool result and therefore into the
-# client's context window, so oversized files are reported but not embedded.
-MAX_EMBEDDED_FILE_BYTES = int(
-    os.environ.get("MENDELEY_MCP_MAX_FILE_BYTES", str(10 * 1024 * 1024))
-)
 
-# Extracted PDF text is returned as a text block straight into the client's
-# context window, so very long papers are truncated to keep the result usable.
-MAX_EXTRACTED_TEXT_CHARS = int(
-    os.environ.get("MENDELEY_MCP_MAX_TEXT_CHARS", str(200_000))
-)
+def _positive_env_int(name: str, default: int) -> int:
+    """Reject invalid bounds before starting the server."""
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        raise ValueError(f"{name} must be a positive integer.") from None
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return value
+
+
+# These cap output, not PDF download size or parsing work.
+MAX_EMBEDDED_FILE_BYTES = _positive_env_int("MENDELEY_MCP_MAX_FILE_BYTES", 10 * 1024 * 1024)
+MAX_EXTRACTED_TEXT_CHARS = _positive_env_int("MENDELEY_MCP_MAX_TEXT_CHARS", 200_000)
 
 # Global client instance
 _client: MendeleyClient | None = None
@@ -1045,14 +1049,16 @@ async def _load_document_pdf(
     except Exception as exc:
         return None, metadata, _document_text_result(
             _format_error_message(exc),
-            {**metadata, "error_stage": "authentication"}, is_error=True,
+            {**metadata, "error_stage": "authentication",
+             "file_available": None, "text_available": False}, is_error=True,
         )
     metadata = await get_document_metadata(client, document_id)
     try:
         data = await client.get_file_content(document_id)
     except Exception as exc:
         return None, metadata, _document_text_result(
-            f"Failed to download file content for document {document_id}: {exc}",
+            f"Failed to download file content for document {document_id}: "
+            f"{_format_error_message(exc)}",
             {**metadata, "file_available": False, "text_available": False,
              "error_stage": "download"}, is_error=True,
         )
@@ -1073,7 +1079,7 @@ def _pdf_extraction_error(
 ) -> CallToolResult:
     return _document_text_result(
         f"Downloaded the file for document {document_id} but could not "
-        f"extract text from it: {exc}",
+        f"extract text from it: {_format_error_message(exc)}",
         {**metadata, "file_available": True, "text_available": False,
          "error_stage": "extraction"}, is_error=True,
     )
@@ -1107,8 +1113,8 @@ def _bounded_page_offsets(
         "Extract and return the full text of the PDF attached to a library "
         "document so the model can read the paper's contents directly. Use this "
         "when asked to read, summarize, or answer questions about a paper. Works "
-        "on text-based (born-digital) PDFs; scanned or image-only PDFs have no "
-        "text layer and return an empty result."
+        "on text-based (born-digital) PDFs. Blank or image-only selected pages "
+        "return a no-text explanation; image-only text requires OCR."
     ),
 )
 async def mendeley_get_document_text(
@@ -1133,7 +1139,9 @@ async def mendeley_get_document_text(
         or (page_start is not None and page_end is not None and page_start > page_end)
     ):
         return _document_text_result(
-            "Invalid PDF page range: use positive, ordered pages.", is_error=True
+            "Invalid PDF page range: use positive, ordered pages.",
+            {"document_id": document_id, "error_stage": "validation",
+             "file_available": None, "text_available": False}, is_error=True
         )
 
     reader, metadata, failure = await _load_document_pdf(document_id)
@@ -1147,7 +1155,8 @@ async def mendeley_get_document_text(
         if start > page_count or end > page_count:
             return _document_text_result(
                 f"PDF page range exceeds the document's {page_count} pages.",
-                {**metadata, "page_count": page_count},
+                {**metadata, "page_count": page_count, "error_stage": "validation",
+                 "file_available": True, "text_available": False},
                 is_error=True,
             )
         extracted_pages: list[dict[str, Any]] = [
@@ -1223,7 +1232,8 @@ async def mendeley_search_document_text(
     if not query or not 1 <= limit <= 100 or not 0 <= context_chars <= 2000:
         return _document_text_result(
             "Provide a nonempty query, limit 1–100, and context_chars 0–2000.",
-            is_error=True,
+            {"document_id": document_id, "error_stage": "validation",
+             "file_available": None, "text_available": False}, is_error=True,
         )
     reader, metadata, failure = await _load_document_pdf(document_id)
     if failure is not None:
