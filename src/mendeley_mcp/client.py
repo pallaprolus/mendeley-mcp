@@ -50,8 +50,9 @@ class _RedactRequestQuery(logging.Filter):
             record.args = ()
             exception_text = record.exc_text
             if exception_text is None and record.exc_info:
-                exception_text = "".join(traceback.format_exception(*record.exc_info))
+                exception_text = "".join(traceback.format_exception(*record.exc_info)).rstrip("\n")
             record.exc_text = self._redact(exception_text) if exception_text else None
+            # Keep sanitized rendered traces; handlers do not receive raw exception objects.
             record.exc_info = None
             if record.stack_info:
                 record.stack_info = self._redact(record.stack_info)

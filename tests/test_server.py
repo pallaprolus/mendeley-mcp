@@ -1389,12 +1389,13 @@ def test_invalid_output_limit_rejected_at_startup(monkeypatch, name, value, requ
     assert f"{name} must be {requirement}" in result.stderr
 
 
-def test_zero_file_limit_keeps_metadata_only_mode(monkeypatch):
+@pytest.mark.parametrize("empty", [False, True])
+def test_zero_file_limit_keeps_metadata_only_mode(monkeypatch, empty):
     monkeypatch.setenv("MENDELEY_MCP_MAX_FILE_BYTES", "0")
     limit = server._env_output_limit("MENDELEY_MCP_MAX_FILE_BYTES", 123, allow_zero=True)
     assert limit == 0
     monkeypatch.setattr(server, "MAX_EMBEDDED_FILE_BYTES", limit)
-    pdf = _make_pdf("readable")
+    pdf = b"" if empty else _make_pdf("readable")
 
     async def fake_get_client():
         return TextDownloadClient(pdf)
@@ -1405,6 +1406,7 @@ def test_zero_file_limit_keeps_metadata_only_mode(monkeypatch):
     assert result.structured_content["file_available"] is True
     assert result.structured_content["size_bytes"] == len(pdf)
     assert all(block.type == "text" for block in result.content)
+    assert "embedding is disabled" in result.content[0].text
 
 
 def test_zero_file_limit_is_valid_at_startup(monkeypatch):
@@ -1416,7 +1418,9 @@ def test_zero_file_limit_is_valid_at_startup(monkeypatch):
     env["MENDELEY_MCP_MAX_FILE_BYTES"] = "0"
     env["MENDELEY_MCP_MAX_TEXT_CHARS"] = "10"
     result = subprocess.run(
-        [sys.executable, "-c", "from mendeley_mcp import server"],
+        [sys.executable, "-c",
+         "from mendeley_mcp import server; print(server.MAX_EMBEDDED_FILE_BYTES)"],
         env=env, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0"

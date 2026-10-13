@@ -985,13 +985,19 @@ async def mendeley_get_file_content(
             structured_content,
         )
 
-    if len(file_content) > MAX_EMBEDDED_FILE_BYTES:
+    if MAX_EMBEDDED_FILE_BYTES == 0 or len(file_content) > MAX_EMBEDDED_FILE_BYTES:
         structured_content = {
             **metadata,
             "file_available": True,
             "mime_type": "application/pdf",
             "size_bytes": len(file_content),
         }
+        if MAX_EMBEDDED_FILE_BYTES == 0:
+            return build_tool_result(
+                f"Attached file for document {document_id} is {len(file_content)} bytes; "
+                "file embedding is disabled by MENDELEY_MCP_MAX_FILE_BYTES=0.",
+                structured_content,
+            )
         return build_tool_result(
             (
                 f"Attached file for document {document_id} is "

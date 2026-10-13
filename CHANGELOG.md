@@ -26,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or exposing their original contents.
 - Non-positive text limits, negative file limits, and malformed limits are
   rejected at startup. A zero file limit still disables embedding and returns
-  file metadata.
+  file metadata, including for an empty attachment. Negative file limits previously
+  also suppressed embedding; they now fail at startup. Use `0` instead.
 - Validation/authentication errors carry document IDs and consistent availability
   fields (`file_available: null` means unknown), and empty exception messages
   retain the exception class name.

@@ -968,6 +968,7 @@ def test_httpx_exception_and_stack_text_are_redacted(caplog):
 async def test_actual_signed_redirect_download_logs_and_auth(mendeley_client, monkeypatch, caplog):
     import logging
 
+    assert mendeley_client.credentials.access_token == "test-access-token"
     signed_url = "https://files.example.com/paper.pdf?X-Amz-Signature=redirect-secret"
     actual_client = httpx.AsyncClient
     calls = []
