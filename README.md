@@ -509,7 +509,7 @@ npx @modelcontextprotocol/inspector mendeley-mcp
 
 **Important**: This server runs locally on your machine. Your credentials and data never pass through any third-party servers - all communication is directly between your computer and Mendeley's API.
 
-**Credential Storage**: Your OAuth tokens and client secret are stored securely in your system's native keyring (macOS Keychain, Windows Credential Locker, or Linux Secret Service). Only the non-sensitive client ID is stored in `~/.config/mendeley-mcp/credentials.json`.
+**Credential Storage**: When keyring support is available, OAuth tokens and the client secret are stored in your system's native keyring (macOS Keychain, Windows Credential Locker, or Linux Secret Service), and only the client ID is saved in `~/.config/mendeley-mcp/credentials.json`. Without keyring support, credentials are saved in that file with private permissions. Signed download URL queries are redacted from HTTPX request logs and omitted from download error messages.
 
 ## Rate Limits
 

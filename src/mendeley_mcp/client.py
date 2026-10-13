@@ -28,6 +28,27 @@ MAX_SEARCH_PAGE_LIMIT = 100
 MAX_PAGES = 100
 
 
+class _RedactRequestQuery(logging.Filter):
+    """Keep signed download credentials out of HTTPX request logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if (
+            record.msg == 'HTTP Request: %s %s "%s %d %s"'
+            and isinstance(record.args, tuple)
+            and len(record.args) == 5
+        ):
+            method, raw_url, version, status, reason = record.args
+            if not isinstance(raw_url, (str, httpx.URL)):
+                return True
+            url = httpx.URL(raw_url)
+            if url.query:
+                record.args = (method, url.copy_with(query=b"REDACTED"), version, status, reason)
+        return True
+
+
+logging.getLogger("httpx").addFilter(_RedactRequestQuery())
+
+
 @dataclass
 class MendeleyCredentials:
     """Mendeley OAuth credentials."""
@@ -565,8 +586,15 @@ class MendeleyClient:
 
         # Download the actual file
         async with httpx.AsyncClient() as download_client:
-            file_response = await download_client.get(download_url)
-            file_response.raise_for_status()
+            try:
+                file_response = await download_client.get(download_url)
+                file_response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(
+                    f"PDF download failed (HTTP {exc.response.status_code})."
+                ) from None
+            except httpx.RequestError:
+                raise RuntimeError("PDF download failed due to a network error.") from None
             return file_response.content
 
     async def search_catalog(
