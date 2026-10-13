@@ -41,20 +41,24 @@ except PackageNotFoundError:  # running from a source tree with no install
 mcp = MCPServer("mendeley", version=__version__)
 
 
-def _positive_env_int(name: str, default: int) -> int:
-    """Reject invalid bounds before starting the server."""
+def _env_output_limit(name: str, default: int, *, allow_zero: bool = False) -> int:
+    """Reject invalid bounds; zero can disable file embedding."""
+    requirement = "an integer greater than or equal to zero" if allow_zero else "a positive integer"
+    message = f"{name} must be {requirement}."
     try:
         value = int(os.environ.get(name, str(default)))
     except ValueError:
-        raise ValueError(f"{name} must be a positive integer.") from None
-    if value < 1:
-        raise ValueError(f"{name} must be a positive integer.")
+        raise ValueError(message) from None
+    if value < 0 or (value == 0 and not allow_zero):
+        raise ValueError(message)
     return value
 
 
 # These cap output, not PDF download size or parsing work.
-MAX_EMBEDDED_FILE_BYTES = _positive_env_int("MENDELEY_MCP_MAX_FILE_BYTES", 10 * 1024 * 1024)
-MAX_EXTRACTED_TEXT_CHARS = _positive_env_int("MENDELEY_MCP_MAX_TEXT_CHARS", 200_000)
+MAX_EMBEDDED_FILE_BYTES = _env_output_limit(
+    "MENDELEY_MCP_MAX_FILE_BYTES", 10 * 1024 * 1024, allow_zero=True,
+)
+MAX_EXTRACTED_TEXT_CHARS = _env_output_limit("MENDELEY_MCP_MAX_TEXT_CHARS", 200_000)
 
 # Global client instance
 _client: MendeleyClient | None = None

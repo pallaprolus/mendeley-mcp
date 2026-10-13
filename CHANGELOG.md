@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results. Page entries now carry `start_offset` and `end_offset` into the
   returned `text`. Migrate Python clients to `text[start_offset:end_offset]`;
   JavaScript clients must slice `Array.from(text)` because offsets count Unicode
-  code points, not UTF-16 units. Plan this change for **0.8.0**, not a patch release.
+  code points, not UTF-16 units. This incompatible field change is reserved for the **0.8.0** minor release.
 
 ### Fixed
 - Reading offsets and truncation flags account for trimming and page separators.
@@ -24,7 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with real HTTPX requests as well as alternate message formats. Exception and
   stack text are also sanitized; malformed records are replaced without throwing
   or exposing their original contents.
-- Non-positive or malformed text/file output limits are rejected at startup.
+- Non-positive text limits, negative file limits, and malformed limits are
+  rejected at startup. A zero file limit still disables embedding and returns
+  file metadata.
 - Validation/authentication errors carry document IDs and consistent availability
   fields (`file_available: null` means unknown), and empty exception messages
   retain the exception class name.

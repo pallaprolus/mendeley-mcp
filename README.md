@@ -379,8 +379,8 @@ JavaScript/TypeScript string indices count UTF-16 units; these offsets count
 Unicode code points, including each non-BMP character as one position. Use:
 
 ```javascript
-const pageText = Array.from(result.text)
-  .slice(page.start_offset, page.end_offset).join("");
+const characters = Array.from(result.text); // Reuse for every page in this result.
+const pageText = characters.slice(page.start_offset, page.end_offset).join("");
 ```
 
 `mendeley_search_document_text(document_id, query, limit=10, context_chars=200)`
@@ -398,7 +398,9 @@ tool performs OCR or semantic search. Empty selected pages may be blank; they
 do not establish that the whole PDF requires OCR. Error results include
 `document_id`, `error_stage`, `file_available`, and `text_available`;
 `file_available: null` means availability was not determined. Output limits
-must be positive integers; invalid configuration is rejected at startup. These
+require a positive text limit and a file limit of zero or greater; zero disables
+file embedding while preserving file metadata. Invalid configuration is rejected
+at startup. These
 limits do not bound PDF download size or parsing work.
 
 Example: search for "evaluation metrics", then read the matching PDF pages.

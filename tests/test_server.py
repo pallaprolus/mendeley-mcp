@@ -1362,12 +1362,17 @@ def test_positive_output_limit_configuration(monkeypatch, value, expected):
         monkeypatch.delenv("MENDELEY_MCP_MAX_TEXT_CHARS", raising=False)
     else:
         monkeypatch.setenv("MENDELEY_MCP_MAX_TEXT_CHARS", value)
-    assert server._positive_env_int("MENDELEY_MCP_MAX_TEXT_CHARS", 123) == expected
+    assert server._env_output_limit("MENDELEY_MCP_MAX_TEXT_CHARS", 123) == expected
 
 
-@pytest.mark.parametrize("name", ["MENDELEY_MCP_MAX_TEXT_CHARS", "MENDELEY_MCP_MAX_FILE_BYTES"])
-@pytest.mark.parametrize("value", ["0", "-5", "not-an-integer"])
-def test_invalid_output_limit_rejected_at_startup(monkeypatch, name, value):
+@pytest.mark.parametrize("name, value, requirement", [
+    ("MENDELEY_MCP_MAX_TEXT_CHARS", "0", "a positive integer"),
+    ("MENDELEY_MCP_MAX_TEXT_CHARS", "-5", "a positive integer"),
+    ("MENDELEY_MCP_MAX_TEXT_CHARS", "not-an-integer", "a positive integer"),
+    ("MENDELEY_MCP_MAX_FILE_BYTES", "-5", "an integer greater than or equal to zero"),
+    ("MENDELEY_MCP_MAX_FILE_BYTES", "not-an-integer", "an integer greater than or equal to zero"),
+])
+def test_invalid_output_limit_rejected_at_startup(monkeypatch, name, value, requirement):
     import os
     import subprocess
     import sys
@@ -1381,4 +1386,37 @@ def test_invalid_output_limit_rejected_at_startup(monkeypatch, name, value):
         env=env, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode != 0
-    assert f"{name} must be a positive integer" in result.stderr
+    assert f"{name} must be {requirement}" in result.stderr
+
+
+def test_zero_file_limit_keeps_metadata_only_mode(monkeypatch):
+    monkeypatch.setenv("MENDELEY_MCP_MAX_FILE_BYTES", "0")
+    limit = server._env_output_limit("MENDELEY_MCP_MAX_FILE_BYTES", 123, allow_zero=True)
+    assert limit == 0
+    monkeypatch.setattr(server, "MAX_EMBEDDED_FILE_BYTES", limit)
+    pdf = _make_pdf("readable")
+
+    async def fake_get_client():
+        return TextDownloadClient(pdf)
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    result = asyncio.run(server.mendeley_get_file_content("doc-text"))
+    assert not result.is_error
+    assert result.structured_content["file_available"] is True
+    assert result.structured_content["size_bytes"] == len(pdf)
+    assert all(block.type == "text" for block in result.content)
+
+
+def test_zero_file_limit_is_valid_at_startup(monkeypatch):
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["MENDELEY_MCP_MAX_FILE_BYTES"] = "0"
+    env["MENDELEY_MCP_MAX_TEXT_CHARS"] = "10"
+    result = subprocess.run(
+        [sys.executable, "-c", "from mendeley_mcp import server"],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr

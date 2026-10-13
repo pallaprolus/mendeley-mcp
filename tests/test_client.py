@@ -975,7 +975,9 @@ async def test_actual_signed_redirect_download_logs_and_auth(mendeley_client, mo
     def handler(request):
         calls.append((request.url.host, request.url.path))
         if request.url.host == "api.mendeley.com":
-            assert request.headers.get("Authorization")
+            assert request.headers.get("Authorization") == (
+                f"Bearer {mendeley_client.credentials.access_token}"
+            )
             if request.url.path == "/files":
                 return httpx.Response(200, json=[{"id": "file-1"}])
             assert request.url.path == "/files/file-1"
