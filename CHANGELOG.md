@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-12 — Page-aware PDF reading and search
+
+### Added
+- Optional inclusive PDF page ranges and page-numbered structured text for
+  `mendeley_get_document_text`, retaining the existing full-text response.
+- `mendeley_search_document_text` for bounded literal phrase search results
+  with PDF page references, source metadata, match counts, and truncation flags.
+
+### Fixed
+- Redact URL query strings from HTTPX request logs so signed PDF download
+  credentials are not printed. Download errors now return status or network
+  summaries without exposing the signed URL.
+
 ## [0.6.3] - 2026-09-27 — No more 100-document cap
 
 ### Fixed

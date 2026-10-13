@@ -861,3 +861,39 @@ class TestDocumentPagination:
 
         assert await mendeley_client.get_documents(limit=1000) == []
         assert len(calls) == 1
+
+
+def test_signed_download_query_is_redacted_from_httpx_logs(caplog):
+    import logging
+
+    url = httpx.URL("https://example.com/paper.pdf?X-Amz-Signature=secret&token=secret")
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        logging.getLogger("httpx").info(
+            'HTTP Request: %s %s "%s %d %s"', "GET", url, "HTTP/1.1", 200, "OK"
+        )
+    assert "secret" not in caplog.text
+    assert "X-Amz-Signature" not in caplog.text
+    assert "paper.pdf?REDACTED" in caplog.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure", ["status", "network"])
+async def test_signed_download_errors_do_not_expose_url(mendeley_client, monkeypatch, failure):
+    from unittest.mock import AsyncMock
+
+    client = mendeley_client
+    secret_url = "https://example.com/paper.pdf?X-Amz-Signature=secret"
+    files = httpx.Response(200, json=[{"id": "file-1"}])
+    redirect = httpx.Response(303, headers={"Location": secret_url})
+    monkeypatch.setattr(client, "_request_file_resource", AsyncMock(side_effect=[files, redirect]))
+    request = httpx.Request("GET", secret_url)
+    error = (
+        httpx.HTTPStatusError("download failed", request=request, response=httpx.Response(403))
+        if failure == "status"
+        else httpx.ConnectError("network failed " + secret_url, request=request)
+    )
+    monkeypatch.setattr(httpx.AsyncClient, "get", AsyncMock(side_effect=error))
+    with pytest.raises(RuntimeError) as caught:
+        await client.get_file_content("doc-1")
+    assert "secret" not in str(caught.value)
+    assert "PDF download failed" in str(caught.value)

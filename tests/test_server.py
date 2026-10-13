@@ -1034,3 +1034,67 @@ async def test_mendeley_update_document_rejects_invalid_tags(
     assert "error" in payload
     assert "tags" in str(payload["error"])
     client.update_document.assert_not_awaited()
+
+
+def _multipage_pdf(*texts):
+    import io
+
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for text in texts:
+        writer.add_page(PdfReader(io.BytesIO(_make_pdf(text))).pages[0])
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def test_document_page_ranges_and_source(monkeypatch):
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf("FIRST", "SECOND", "THIRD"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    result = asyncio.run(server.mendeley_get_document_text("doc-text", 2, 2))
+    content = result.structured_content
+    assert not result.is_error
+    assert content["page_count"] == 3
+    assert content["pages"][0]["page_number"] == 2
+    assert "SECOND" in content["text"]
+    assert "FIRST" not in content["text"]
+    assert "THIRD" not in content["text"]
+    assert "10.1234/readable" in str(content)
+    for start, end in [(0, 1), (3, 2), (1, 4)]:
+        assert asyncio.run(server.mendeley_get_document_text("doc-text", start, end)).is_error
+
+
+def test_search_all_pages_even_beyond_output_cap(monkeypatch):
+    async def fake_get_client():
+        return TextDownloadClient(_multipage_pdf("A" * 50, "Target target", "TARGET"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    monkeypatch.setattr(server, "MAX_EXTRACTED_TEXT_CHARS", 10)
+    result = asyncio.run(server.mendeley_search_document_text("doc-text", "target", 1, 0))
+    content = result.structured_content
+    assert content["total_matches"] == 3
+    assert content["matches"][0]["page_number"] == 2
+    assert content["matches"][0]["text"] == "Target"
+    assert content["truncated"] is True
+    assert asyncio.run(server.mendeley_search_document_text("doc-text", " ")).is_error
+
+
+def test_search_no_match_and_scanned_pdf(monkeypatch):
+    async def fake_get_client():
+        return TextDownloadClient(_make_pdf("No match"))
+
+    monkeypatch.setattr(server, "get_client", fake_get_client)
+    content = asyncio.run(server.mendeley_search_document_text("doc-text", ".*")).structured_content
+    assert content["total_matches"] == 0
+    assert content["text_available"] is True
+
+    async def scanned_client():
+        return TextDownloadClient(_make_pdf(""))
+
+    monkeypatch.setattr(server, "get_client", scanned_client)
+    result = asyncio.run(server.mendeley_search_document_text("doc-text", "target"))
+    assert not result.is_error
+    assert result.structured_content["text_available"] is False
