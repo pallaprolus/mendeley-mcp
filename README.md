@@ -353,6 +353,25 @@ Add a document to a folder:
 }
 ```
 
+### Page-aware PDF reading and search
+
+`mendeley_get_document_text` accepts optional `page_start` and `page_end`
+(1-based, inclusive). Omitted bounds select the first or last PDF page.
+Existing calls still return full text; structured results also include bounded
+`pages` entries with `page_number`, `text`, and `truncated`. The overall text
+limit applies to both representations. Page numbers refer to PDF positions,
+not printed page labels. Blank selected pages can have no extractable text.
+
+`mendeley_search_document_text(document_id, query, limit=10, context_chars=200)`
+searches every PDF page for a literal, case-insensitive phrase, including pages
+beyond the reading output limit. It returns source metadata, page-numbered
+passages, character offsets, `total_matches`, and explicit truncation flags.
+`limit` accepts 1–100; `context_chars` accepts 0–2000. Matching uses extracted
+text as-is, so phrases split across PDF line breaks may not match. Neither
+tool performs OCR or semantic search.
+
+Example: search for "evaluation metrics", then read the matching PDF pages.
+
 ### Folder Management Validation
 
 - `mendeley_create_folder` requires a non-empty `name`. You can optionally provide `parent_id` for nested creation or `group_id` for a group-scoped folder.

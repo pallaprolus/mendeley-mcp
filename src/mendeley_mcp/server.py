@@ -1059,16 +1059,29 @@ def _document_text_result(
 )
 async def mendeley_get_document_text(
     document_id: str,
+    page_start: int | None = None,
+    page_end: int | None = None,
 ) -> CallToolResult:
     """
     Download the first file attached to a Mendeley document and extract its text.
 
     Args:
         document_id: Mendeley document ID or catalog ID
+        page_start: First PDF page to read (1-based, inclusive).
+        page_end: Last PDF page to read (inclusive); defaults to the last page.
 
     Returns:
         MCP tool result whose second text block holds the extracted PDF text
     """
+    if (
+        (page_start is not None and page_start < 1)
+        or (page_end is not None and page_end < 1)
+        or (page_start is not None and page_end is not None and page_start > page_end)
+    ):
+        return _document_text_result(
+            "Invalid PDF page range: use positive, ordered pages.", is_error=True
+        )
+
     try:
         client = await get_client()
     except Exception as e:
@@ -1105,7 +1118,21 @@ async def mendeley_get_document_text(
         )
 
     try:
-        text, page_count = extract_pdf_text(file_content)
+        reader = PdfReader(io.BytesIO(file_content))
+        page_count = len(reader.pages)
+        start = page_start or 1
+        end = page_end if page_end is not None else page_count
+        if start > page_count or end > page_count:
+            return _document_text_result(
+                f"PDF page range exceeds the document's {page_count} pages.",
+                {**metadata, "page_count": page_count},
+                is_error=True,
+            )
+        extracted_pages: list[dict[str, Any]] = [
+            {"page_number": number, "text": reader.pages[number - 1].extract_text() or ""}
+            for number in range(start, end + 1)
+        ]
+        text = "\n\n".join(page["text"] for page in extracted_pages)
     except Exception as e:
         structured_content = {
             **metadata,
@@ -1140,11 +1167,28 @@ async def mendeley_get_document_text(
 
     truncated = len(stripped) > MAX_EXTRACTED_TEXT_CHARS
     body = stripped[:MAX_EXTRACTED_TEXT_CHARS] if truncated else stripped
+    remaining = MAX_EXTRACTED_TEXT_CHARS
+    bounded_pages = []
+    for page in extracted_pages:
+        page_text = page["text"]
+        returned = page_text[: max(remaining, 0)]
+        bounded_pages.append(
+            {
+                "page_number": page["page_number"],
+                "text": returned,
+                "truncated": len(returned) < len(page_text),
+            }
+        )
+        remaining -= len(returned)
     structured_content = {
         **metadata,
         "file_available": True,
         "text_available": True,
         "page_count": page_count,
+        "page_start": start,
+        "page_end": end,
+        "page_numbering": "1-based PDF pages, not printed page labels",
+        "pages": bounded_pages,
         "char_count": len(stripped),
         "truncated": truncated,
         # Some clients expose only structuredContent to the model (#11).
@@ -1159,10 +1203,83 @@ async def mendeley_get_document_text(
         )
     title = metadata.get("title") or document_id
     return _document_text_result(
-        f"Extracted text from {page_count} page(s) of '{title}'{note}.",
+        f"Extracted text from PDF pages {start}–{end} of '{title}'{note}.",
         structured_content,
         additional_text=body,
     )
+
+
+@mcp.tool(
+    title="Search Document Text",
+    description="Find literal, case-insensitive phrases in an attached PDF. Returns bounded "
+    "passages with 1-based PDF page numbers and source metadata. No OCR.",
+)
+async def mendeley_search_document_text(
+    document_id: str,
+    query: str,
+    limit: int = 10,
+    context_chars: int = 200,
+) -> CallToolResult:
+    """Search all PDF pages; query is a literal phrase, not a regular expression."""
+    query = query.strip()
+    if not query or not 1 <= limit <= 100 or not 0 <= context_chars <= 2000:
+        return _document_text_result(
+            "Provide a nonempty query, limit 1–100, and context_chars 0–2000.",
+            is_error=True,
+        )
+    try:
+        client = await get_client()
+        metadata = await get_document_metadata(client, document_id)
+        data = await client.get_file_content(document_id)
+        if data is None:
+            return _document_text_result(
+                "No attached file is available.", {**metadata, "file_available": False}
+            )
+        reader = PdfReader(io.BytesIO(data))
+        matches: list[dict[str, Any]] = []
+        total = 0
+        has_text = False
+        budget = MAX_EXTRACTED_TEXT_CHARS
+        for number, page in enumerate(reader.pages, 1):
+            text = page.extract_text() or ""
+            has_text = has_text or bool(text.strip())
+            for match in re.finditer(re.escape(query), text, re.IGNORECASE):
+                total += 1
+                if len(matches) >= limit or budget <= 0:
+                    continue
+                left = max(0, match.start() - context_chars)
+                right = min(len(text), match.end() + context_chars)
+                snippet = text[left:right]
+                returned = snippet[:budget]
+                matches.append(
+                    {
+                        "page_number": number,
+                        "text": returned,
+                        "match_start": match.start(),
+                        "match_end": match.end(),
+                        "passage_start": left,
+                        "truncated": len(returned) < len(snippet),
+                    }
+                )
+                budget -= len(returned)
+        return _document_text_result(
+            f"Found {total} match(es); returned {len(matches)} passages."
+            if has_text
+            else "PDF has no extractable text layer; OCR is required.",
+            {
+                **metadata,
+                "file_available": True,
+                "text_available": has_text,
+                "page_count": len(reader.pages),
+                "query": query,
+                "page_numbering": "1-based PDF pages, not printed page labels",
+                "total_matches": total,
+                "matches": matches,
+                "truncated": total > len(matches) or any(m["truncated"] for m in matches),
+            },
+        )
+    except Exception as e:
+        return _document_text_result(_format_error_message(e), is_error=True)
 
 
 @mcp.resource("mendeley://library/recent")
@@ -1183,10 +1300,7 @@ async def get_all_folders() -> str:
     client = await get_client()
     try:
         folders = await client.get_folders()
-        results = [
-            {"id": f.id, "name": f.name, "parent_id": f.parent_id}
-            for f in folders
-        ]
+        results = [{"id": f.id, "name": f.name, "parent_id": f.parent_id} for f in folders]
         return _json_response(results)
     except Exception as e:
         return json.dumps({"error": str(e)})
