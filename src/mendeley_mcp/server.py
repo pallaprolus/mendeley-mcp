@@ -1019,18 +1019,6 @@ async def mendeley_get_file_content(
     )
 
 
-def extract_pdf_text(data: bytes) -> tuple[str, int]:
-    """Extract text from PDF bytes, returning (text, page_count).
-
-    Most MCP clients do not decode the embedded PDF resource returned by
-    ``mendeley_get_file_content`` into something the model can read, so this
-    pulls the text out server-side instead.
-    """
-    reader = PdfReader(io.BytesIO(data))
-    pages = [(page.extract_text() or "") for page in reader.pages]
-    return "\n\n".join(pages), len(reader.pages)
-
-
 def _document_text_result(
     message: str,
     structured_content: dict[str, Any] | None = None,
@@ -1045,6 +1033,72 @@ def _document_text_result(
         is_error=is_error,
         additional_text=additional_text,
     )
+
+
+async def _load_document_pdf(
+    document_id: str,
+) -> tuple[PdfReader | None, dict[str, Any], CallToolResult | None]:
+    """Share source metadata and failure reporting between reading and search."""
+    metadata: dict[str, Any] = {"document_id": document_id}
+    try:
+        client = await get_client()
+    except Exception as exc:
+        return None, metadata, _document_text_result(
+            _format_error_message(exc),
+            {**metadata, "error_stage": "authentication"}, is_error=True,
+        )
+    metadata = await get_document_metadata(client, document_id)
+    try:
+        data = await client.get_file_content(document_id)
+    except Exception as exc:
+        return None, metadata, _document_text_result(
+            f"Failed to download file content for document {document_id}: {exc}",
+            {**metadata, "file_available": False, "text_available": False,
+             "error_stage": "download"}, is_error=True,
+        )
+    if data is None:
+        return None, metadata, _document_text_result(
+            f"No attached file is available for document {document_id}. "
+            "Catalog entries frequently do not expose downloadable files.",
+            {**metadata, "file_available": False, "text_available": False},
+        )
+    try:
+        return PdfReader(io.BytesIO(data)), metadata, None
+    except Exception as exc:
+        return None, metadata, _pdf_extraction_error(document_id, metadata, exc)
+
+
+def _pdf_extraction_error(
+    document_id: str, metadata: dict[str, Any], exc: Exception,
+) -> CallToolResult:
+    return _document_text_result(
+        f"Downloaded the file for document {document_id} but could not "
+        f"extract text from it: {exc}",
+        {**metadata, "file_available": True, "text_available": False,
+         "error_stage": "extraction"}, is_error=True,
+    )
+
+
+def _bounded_page_offsets(
+    pages: list[dict[str, Any]], joined: str, returned_length: int,
+) -> list[dict[str, Any]]:
+    """Offsets index the trimmed, bounded text, counting inter-page separators."""
+    trim_start = len(joined) - len(joined.lstrip())
+    trim_end = len(joined.rstrip())
+    position = 0
+    bounds = []
+    for page in pages:
+        raw_end = position + len(page["text"])
+        start = max(0, min(position, trim_end) - trim_start)
+        end = max(0, min(raw_end, trim_end) - trim_start)
+        bounds.append({
+            "page_number": page["page_number"],
+            "start_offset": min(start, returned_length),
+            "end_offset": min(end, returned_length),
+            "truncated": end > returned_length and end > start,
+        })
+        position = raw_end + 2
+    return bounds
 
 
 @mcp.tool(
@@ -1082,43 +1136,11 @@ async def mendeley_get_document_text(
             "Invalid PDF page range: use positive, ordered pages.", is_error=True
         )
 
+    reader, metadata, failure = await _load_document_pdf(document_id)
+    if failure is not None:
+        return failure
+    assert reader is not None
     try:
-        client = await get_client()
-    except Exception as e:
-        return _document_text_result(_format_error_message(e), is_error=True)
-
-    metadata = await get_document_metadata(client, document_id)
-
-    try:
-        file_content = await client.get_file_content(document_id)
-    except Exception as e:
-        structured_content = {
-            **metadata,
-            "file_available": False,
-            "text_available": False,
-        }
-        return _document_text_result(
-            f"Failed to download file content for document {document_id}: {e}",
-            structured_content,
-            is_error=True,
-        )
-
-    if file_content is None:
-        structured_content = {
-            **metadata,
-            "file_available": False,
-            "text_available": False,
-        }
-        return _document_text_result(
-            (
-                f"No attached file is available for document {document_id}. "
-                "Catalog entries frequently do not expose downloadable files."
-            ),
-            structured_content,
-        )
-
-    try:
-        reader = PdfReader(io.BytesIO(file_content))
         page_count = len(reader.pages)
         start = page_start or 1
         end = page_end if page_end is not None else page_count
@@ -1133,20 +1155,8 @@ async def mendeley_get_document_text(
             for number in range(start, end + 1)
         ]
         text = "\n\n".join(page["text"] for page in extracted_pages)
-    except Exception as e:
-        structured_content = {
-            **metadata,
-            "file_available": True,
-            "text_available": False,
-        }
-        return _document_text_result(
-            (
-                f"Downloaded the file for document {document_id} but could not "
-                f"extract text from it: {e}"
-            ),
-            structured_content,
-            is_error=True,
-        )
+    except Exception as exc:
+        return _pdf_extraction_error(document_id, metadata, exc)
 
     stripped = text.strip()
     if not stripped:
@@ -1155,31 +1165,19 @@ async def mendeley_get_document_text(
             "file_available": True,
             "text_available": False,
             "page_count": page_count,
+            "page_start": start,
+            "page_end": end,
+            "pages": _bounded_page_offsets(extracted_pages, text, 0),
         }
         return _document_text_result(
-            (
-                f"The attached file for document {document_id} has no extractable "
-                "text layer. It is likely a scanned or image-only PDF, which would "
-                "need OCR to read."
-            ),
+            f"Selected PDF pages {start}–{end} have no extractable text layer. "
+            "They may be blank or image-only; image-only text would require OCR.",
             structured_content,
         )
 
     truncated = len(stripped) > MAX_EXTRACTED_TEXT_CHARS
     body = stripped[:MAX_EXTRACTED_TEXT_CHARS] if truncated else stripped
-    remaining = MAX_EXTRACTED_TEXT_CHARS
-    bounded_pages = []
-    for page in extracted_pages:
-        page_text = page["text"]
-        returned = page_text[: max(remaining, 0)]
-        bounded_pages.append(
-            {
-                "page_number": page["page_number"],
-                "text": returned,
-                "truncated": len(returned) < len(page_text),
-            }
-        )
-        remaining -= len(returned)
+    bounded_pages = _bounded_page_offsets(extracted_pages, text, len(body))
     structured_content = {
         **metadata,
         "file_available": True,
@@ -1227,15 +1225,11 @@ async def mendeley_search_document_text(
             "Provide a nonempty query, limit 1–100, and context_chars 0–2000.",
             is_error=True,
         )
+    reader, metadata, failure = await _load_document_pdf(document_id)
+    if failure is not None:
+        return failure
+    assert reader is not None
     try:
-        client = await get_client()
-        metadata = await get_document_metadata(client, document_id)
-        data = await client.get_file_content(document_id)
-        if data is None:
-            return _document_text_result(
-                "No attached file is available.", {**metadata, "file_available": False}
-            )
-        reader = PdfReader(io.BytesIO(data))
         matches: list[dict[str, Any]] = []
         total = 0
         has_text = False
@@ -1247,10 +1241,19 @@ async def mendeley_search_document_text(
                 total += 1
                 if len(matches) >= limit or budget <= 0:
                     continue
-                left = max(0, match.start() - context_chars)
-                right = min(len(text), match.end() + context_chars)
-                snippet = text[left:right]
-                returned = snippet[:budget]
+                match_length = match.end() - match.start()
+                if budget < match_length:
+                    continue
+                desired_left = max(0, match.start() - context_chars)
+                desired_right = min(len(text), match.end() + context_chars)
+                # Keep the complete match; trim context instead of the phrase.
+                spare = budget - match_length
+                before = min(match.start() - desired_left, spare // 2)
+                after = min(desired_right - match.end(), spare - before)
+                before = min(match.start() - desired_left, spare - after)
+                left = match.start() - before
+                right = match.end() + after
+                returned = text[left:right]
                 matches.append(
                     {
                         "page_number": number,
@@ -1258,14 +1261,15 @@ async def mendeley_search_document_text(
                         "match_start": match.start(),
                         "match_end": match.end(),
                         "passage_start": left,
-                        "truncated": len(returned) < len(snippet),
+                        "truncated": left > desired_left or right < desired_right,
                     }
                 )
                 budget -= len(returned)
         return _document_text_result(
             f"Found {total} match(es); returned {len(matches)} passages."
             if has_text
-            else "PDF has no extractable text layer; OCR is required.",
+            else "PDF has no extractable text layer; pages may be blank or image-only. "
+            "Image-only text would require OCR.",
             {
                 **metadata,
                 "file_available": True,
@@ -1278,8 +1282,8 @@ async def mendeley_search_document_text(
                 "truncated": total > len(matches) or any(m["truncated"] for m in matches),
             },
         )
-    except Exception as e:
-        return _document_text_result(_format_error_message(e), is_error=True)
+    except Exception as exc:
+        return _pdf_extraction_error(document_id, metadata, exc)
 
 
 @mcp.resource("mendeley://library/recent")

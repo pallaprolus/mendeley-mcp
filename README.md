@@ -358,8 +358,13 @@ Add a document to a folder:
 `mendeley_get_document_text` accepts optional `page_start` and `page_end`
 (1-based, inclusive). Omitted bounds select the first or last PDF page.
 Existing calls still return full text; structured results also include bounded
-`pages` entries with `page_number`, `text`, and `truncated`. The overall text
-limit applies to both representations. Page numbers refer to PDF positions,
+`pages` entries with `page_number`, `start_offset`, `end_offset`, and
+`truncated`, without another copy of the text. Offsets are zero-based Python
+character positions in the returned `text`; the end offset is exclusive.
+They account for trimming and the two-newline page separators. A fully omitted
+page has both offsets at the end of the returned text and is flagged as truncated
+when it contained text. The overall text limit applies to both compatibility
+representations. Page numbers refer to PDF positions,
 not printed page labels. Blank selected pages can have no extractable text.
 
 `mendeley_search_document_text(document_id, query, limit=10, context_chars=200)`
@@ -367,8 +372,14 @@ searches every PDF page for a literal, case-insensitive phrase, including pages
 beyond the reading output limit. It returns source metadata, page-numbered
 passages, character offsets, `total_matches`, and explicit truncation flags.
 `limit` accepts 1–100; `context_chars` accepts 0–2000. Matching uses extracted
-text as-is, so phrases split across PDF line breaks may not match. Neither
-tool performs OCR or semantic search.
+text as-is, so phrases split across PDF line breaks may not match. Returned
+passages always contain the complete match: context is reduced first, and a
+passage is omitted if the remaining budget cannot hold the phrase. Total match
+counts still include omitted passages. Match and passage offsets index the
+original extracted page text, while reading offsets index the returned text.
+Download and extraction errors retain source metadata in both tools. Neither
+tool performs OCR or semantic search. Empty selected pages may be blank; they
+do not establish that the whole PDF requires OCR.
 
 Example: search for "evaluation metrics", then read the matching PDF pages.
 

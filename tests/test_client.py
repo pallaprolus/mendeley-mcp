@@ -897,3 +897,36 @@ async def test_signed_download_errors_do_not_expose_url(mendeley_client, monkeyp
         await client.get_file_content("doc-1")
     assert "secret" not in str(caught.value)
     assert "PDF download failed" in str(caught.value)
+
+
+@pytest.mark.anyio
+async def test_real_httpx_request_redacts_signed_query(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200))
+        ) as client:
+            await client.get("https://example.com/paper.pdf?X-Amz-Signature=actual-secret")
+    assert "paper.pdf" in caplog.text  # ensure the actual request produced a log
+    assert "actual-secret" not in caplog.text
+    assert "X-Amz-Signature" not in caplog.text
+    assert "REDACTED" in caplog.text
+
+
+@pytest.mark.parametrize("style", ["changed_format", "preformatted", "mapping"])
+def test_query_redaction_does_not_depend_on_log_wording(caplog, style):
+    import logging
+
+    url = "https://example.com/paper.pdf?token=private-secret"
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        logger = logging.getLogger("httpx")
+        if style == "changed_format":
+            logger.info("Downloaded %s with status %s", httpx.URL(url), 200)
+        elif style == "mapping":
+            logger.info("Fetched %(url)s", {"url": url})
+        else:
+            logger.info("Fetched " + url)
+    assert "private-secret" not in caplog.text
+    assert "token=" not in caplog.text
+    assert "paper.pdf?REDACTED" in caplog.text

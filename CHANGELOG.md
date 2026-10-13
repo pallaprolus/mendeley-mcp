@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- PDF page entries now carry offsets into the returned text instead of a third
+  text copy. Offsets and truncation flags account for trimming and page separators.
+- Search passages preserve the complete matched phrase when reducing context;
+  passages that cannot fit are omitted while retaining the total match count.
+- Reading and search share source-aware download and extraction errors; blank
+  selected pages no longer imply that an entire PDF requires OCR.
+- URL-query redaction no longer depends on HTTPX's exact log wording, verified
+  with real HTTPX requests as well as alternate message formats.
+
 ## [0.7.0] - 2026-10-12 — Page-aware PDF reading and search
 
 ### Added

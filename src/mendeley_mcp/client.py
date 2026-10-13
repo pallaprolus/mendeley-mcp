@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,17 +33,15 @@ class _RedactRequestQuery(logging.Filter):
     """Keep signed download credentials out of HTTPX request logs."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if (
-            record.msg == 'HTTP Request: %s %s "%s %d %s"'
-            and isinstance(record.args, tuple)
-            and len(record.args) == 5
-        ):
-            method, raw_url, version, status, reason = record.args
-            if not isinstance(raw_url, (str, httpx.URL)):
-                return True
-            url = httpx.URL(raw_url)
-            if url.query:
-                record.args = (method, url.copy_with(query=b"REDACTED"), version, status, reason)
+        # Sanitize the rendered message, regardless of HTTPX's format string or
+        # whether the URL arrived as a URL object, string argument, or message.
+        record.msg = re.sub(
+            r"https?://[^\s\"'<>]+",
+            lambda match: match.group().split("?", 1)[0] + "?REDACTED"
+            if "?" in match.group() else match.group(),
+            record.getMessage(),
+        )
+        record.args = ()
         return True
 
 
